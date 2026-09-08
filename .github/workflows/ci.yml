@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # Enforces the DCO sign-off promised in CONTRIBUTING.md. Deliberately an
+  # inline check instead of a third-party action: it is ~15 lines of git, and a
+  # marketplace action would add a supply-chain dependency to every PR.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 — the check walks the PR commit range, which shallow
+      # clones do not contain. Still needed on checkout v7: the default is
+      # depth 1, and v7's only behaviour change is blocking fork checkouts for
+      # pull_request_target / workflow_run, neither of which this workflow uses.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check_dco.sh "$BASE_SHA" "$HEAD_SHA"
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Node 24, not 20: Node 20 went end-of-life in April 2026. It only has to
+      # run the pinned pyright below, which is version-pinned separately.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # CI validates the Android code path on a host runner; Android is the only supported runtime target.
+      - run: pip install -e .
+      - run: pip install ruff pytest pytest-asyncio
+      - run: ruff check jenny/ tests/
+      # pyright is a static check only (zero runtime impact); config in pyrightconfig.json.
+      # BLOCKING: restricted to the already-error-clean subset — must stay green.
+      - run: npx --yes pyright@1.1.411 jenny/bus jenny/command jenny/runtime jenny/session
+      # NON-BLOCKING visibility: full perimeter, surfaces residual errors without failing CI.
+      - run: npx --yes pyright@1.1.411 || true
+
+  test:
+    runs-on: ubuntu-latest
+    # La suite sta in ~2 minuti in locale. Il default di GitHub è 360: un test
+    # appeso li brucerebbe tutti prima di dire com'è andata.
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Node serve a QUESTO job, non solo al lint: una ventina di suite della
+      # WebUI eseguono il JS reale con `node` e si SALTANO se manca. Passavano
+      # solo perche' l'immagine ubuntu-latest lo include di suo — il giorno che
+      # smettesse, ~200 prove sparirebbero in verde. Il guard in
+      # tests/webui/test_node_is_available.py fallisce invece di saltare quando
+      # `CI` e' impostata, cosi' la sparizione fa rumore.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # jsdom non e' una dipendenza del repo (non e' un progetto npm), quindi si
+      # installa qui e si rende risolvibile via NODE_PATH: e' il comando che la
+      # docstring di tests/webui/test_graph_search_contract.py indica. Senza,
+      # quel file — l'unico che copre la maschera di ricerca contro i nodi
+      # davvero disegnati — non gira mai, ne' qui ne' in locale.
+      - run: npm install --no-save jsdom
+      - run: echo "NODE_PATH=$PWD/node_modules" >> "$GITHUB_ENV"
+      # CI validates the Android code path on a host runner; Android is the only supported runtime target.
+      - run: pip install -e .
+      - run: pip install ruff pytest pytest-asyncio
+      # Backend crypto dev/test per i test del backup cifrato (su Android si
+      # usa javax.crypto: `cryptography` NON va mai nei requirements Android).
+      - run: pip install cryptography
+      # Stesso trattamento: il backend SSH desktop (`ssh_backends/dev.py`) alza
+      # un server asyncssh in-process per la suite. Su Android il client è jsch
+      # via bridge nativo e `asyncssh` NON va mai nei requirements Android.
+      # Senza questa riga i tre moduli di test SSH fallivano in collection.
+      - run: pip install asyncssh
+      # NON aggiungere `--cov` qui, e non reinstallare `pytest-cov`: la misura
+      # perturba ciò che misura. La sandbox di `python_exec` intercetta *tutte*
+      # le operazioni su path del processo per la durata di una `execute`,
+      # rifiuta quelle fuori dal workspace e le mette a verbale; le letture di
+      # path del tracer di coverage cadono in quella finestra, vengono rifiutate
+      # come le altre, e le prove che asseriscono un verbale pulito falliscono.
+      # Non è aggirabile: allargare l'esenzione della sandbox indebolirebbe un
+      # confine di sicurezza su una piattaforma che non spediamo (fuori da
+      # Chaquopy `_discover_runtime_path_prefixes` è vuota di proposito);
+      # sospendere il tracer attorno a ogni `execute` è stato misurato e va da
+      # 122 s a oltre venti minuti; marcare le prove con `no_cover` sposta il
+      # problema sulla prima prova non marcata, all'infinito.
+      # Il report non aveva consumatori — nessun `fail_under`, nessun badge,
+      # nessun servizio esterno — e in cambio ha tenuto questa CI rossa per tre
+      # release, cioè ha insegnato a ignorare l'unico segnale che conta. Per
+      # vederlo in locale: `pytest -q --cov=jenny`, sapendo che quelle prove
+      # della sandbox falliranno e che il motivo è questo.
+      - run: pytest -q

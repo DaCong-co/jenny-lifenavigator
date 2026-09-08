@@ -1,0 +1,1041 @@
+/** Mobile App — Entry point and orchestration. */
+
+import { AppState } from './shared/state.js';
+import { sessionManager } from './shared/session-manager.js';
+import { scopeChip } from './shared/scope-chip.js';
+import { writeSwitch } from './shared/write-switch.js';
+import { showToast } from './shared/utils.js';
+import { i18n } from './shared/i18n.js';
+import { api } from './shared/api-client.js';
+import { ViewTitleController } from './mobile-header.js';
+import { DrawerManager } from './mobile-drawer.js';
+import { LauncherController } from './mobile-launcher.js';
+import { ChatController } from './mobile-chat.js';
+import { WorkspaceController } from './mobile-workspace.js';
+import { AppsController } from './mobile-apps.js';
+import { GraphController } from './mobile-graph.js';
+import { WikiController } from './mobile-wiki.js';
+import { SettingsController } from './mobile-settings.js';
+import { OnboardingController } from './mobile-onboarding.js';
+import { JennyCompanion } from './mobile-jenny.js';
+import { UiQueryResponder } from './mobile-ui-query.js';
+import { keyboard } from './shared/keyboard.js';
+import { homeView } from './shared/home-view.js';
+import './shared/theme.js';
+
+export { showToast };
+
+/* ── Global Error Handling ── */
+// Oltre al toast, l'errore viene inoltrato al log del gateway (/api/client-log):
+// la console del WebView è visibile solo via adb, quindi senza inoltro un
+// errore JS on-device è di fatto invisibile.
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e.error);
+  const detail = e.error && e.error.stack ? e.error.stack : `${e.message} @ ${e.filename}:${e.lineno}`;
+  api.clientLog('error', 'window.onerror', detail);
+  showToast(i18n.t('common.genericError'), 'error');
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Unhandled rejection:', e.reason);
+  const detail = e.reason && e.reason.stack ? e.reason.stack : String(e.reason);
+  api.clientLog('error', 'unhandledrejection', detail);
+  showToast(i18n.t('common.networkError'), 'error');
+});
+
+/* ── Keyboard Helper ── */
+function ensureVisible(el) {
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 300);
+}
+
+class MobileApp {
+  constructor() {
+    this.header = new ViewTitleController();
+    this.drawer = new DrawerManager();
+    this.jenny = new JennyCompanion();
+    this.uiQuery = new UiQueryResponder();
+    // Il cassetto delle app non è una vista: niente `view-*`, niente entry di
+    // history, quindi non sta fra i controller lazy. È un livello sopra la
+    // vista corrente, e il suo markup è statico — si costruisce qui, con gli
+    // altri pezzi permanenti del guscio.
+    this.launcher = new LauncherController(this);
+
+    // Lazy controller factories
+    this.controllerFactories = {
+      chat:      () => new ChatController(),
+      workspace: () => new WorkspaceController(),
+      apps:      () => new AppsController(),
+      settings:  () => new SettingsController(),
+      graph:     () => new GraphController(),
+      wiki:      () => new WikiController(),
+      onboarding: () => new OnboardingController(),
+    };
+    this.controllers = {};
+
+    this.currentMode = null;
+    // Posizione nello stack di navigazione *nostro* (0 = radice). Ogni entry
+    // spinta da pushNav se la porta dietro, così il back sa quando è arrivato
+    // in fondo. `history.length` non risponde alla domanda: conta l'intera
+    // sessione del WebView (iframe delle mini-app, reload) e non cala mai.
+    this._navPos = 0;
+    // Gate di readiness dello shell nativo: alcune animazioni d'ingresso (es. la
+    // caduta della mini Jenny nell'onboarding) devono partire solo quando il
+    // loading nativo è sparito e il WebView è visibile, altrimenti scorrono
+    // dietro l'overlay e se ne vede solo la coda.
+    this._shellReady = false;
+    this._shellReadyCbs = [];
+    // Vista del grafo richiesta da chi sta per entrare nella sezione, consumata
+    // da GraphController.activate() (v. requestGraph).
+    this._pendingGraph = null;
+    window.mobileApp = this;
+    this.init();
+  }
+
+  /* Invocato dal guscio Android (MainActivity.hideLoading) a fade completato.
+     Fuori dallo shell nativo lo emula whenShellReady via requestAnimationFrame. */
+  onNativeReady() {
+    if (this._shellReady) return;
+    this._shellReady = true;
+    this._shellReadyCbs.splice(0).forEach((cb) => cb());
+  }
+
+  /* Esegue `cb` quando lo shell è pronto (loading nascosto). In un browser
+     normale — senza il bridge JennyNative — parte al frame successivo. */
+  whenShellReady(cb) {
+    if (this._shellReady) return cb();
+    this._shellReadyCbs.push(cb);
+    if (!window.JennyNative) requestAnimationFrame(() => this.onNativeReady());
+  }
+
+  async init() {
+    // Bootstrap auth token before anything else
+    try {
+      await api.bootstrap();
+    } catch (err) {
+      console.error('Bootstrap failed:', err);
+    }
+
+    // Load i18n and update sidebar
+    i18n.load(i18n.locale).then(() => {
+      this._updateSidebarTitles();
+      this._applyStaticTranslations();
+      this.header._refreshTitles();
+      // Il chip dello scope scrive il proprio testo da JS, quindi
+      // _applyStaticTranslations non lo raggiunge: senza questo resterebbe con
+      // le chiavi grezze ("scope.personal") fino al primo cambio di lingua.
+      scopeChip.render();
+      writeSwitch.render();
+    });
+    i18n.onLocaleChange(() => {
+      this._updateSidebarTitles();
+      this._applyStaticTranslations();
+    });
+
+    // Sidebar navigation
+    document.querySelectorAll('.dock-item[data-mode]').forEach(item => {
+      item.addEventListener('click', () => {
+        /* Lo slot Apps apre il cassetto invece di cambiare vista: è il gesto
+           più frequente, e cercare un lanciatore nel dock è la prima cosa che
+           si fa. `data-mode` gli resta comunque, così il carosello orizzontale
+           continua a raggiungere la scheda — che non diventa irraggiungibile,
+           solo meno immediata: dal foglio ci si arriva con «Gestisci». */
+        if (item.dataset.opens === 'launcher') this.openLauncher();
+        else this.switchMode(item.dataset.mode);
+      });
+    });
+
+    // Drawer open/close sync
+    this.drawer.addEventListener('open', () => this.header.syncDrawerTabs());
+    this.drawer.addEventListener('close', () => this.header.syncDrawerTabs());
+
+    // Browser back/forward
+    window.addEventListener('popstate', (e) => {
+      const state = e.state;
+      // Entry non nostra (state null): la lasciava passare in silenzio, senza
+      // aggiornare _navPos e senza cambiare niente a schermo — una pressione
+      // persa, e da lì in poi _navPos sballato in permanenza. Si prosegue
+      // invece all'indietro: la radice ha sempre uno stato (init la riscrive
+      // con replaceNav), quindi il salto termina sempre su una entry nostra.
+      if (!state) {
+        if (this._navPos > 0) window.history.back();
+        return;
+      }
+      // La entry ripristinata porta con sé la propria posizione nello stack:
+      // è così che handleHardwareBack sa se sotto c'è ancora roba nostra.
+      this._navPos = typeof state.pos === 'number' ? state.pos : 0;
+      if (state.wikiPage) {
+        this.switchMode('wiki', false);
+        // Una entry lasciata da un altro progetto non ci riporta dentro, ma un
+        // Indietro deve pur disegnare qualcosa: si atterra sull'indice del
+        // progetto aperto. Il rifiuto parlante di `loadWikiPage` è per i link,
+        // dove l'utente ha appena chiesto quella pagina; qui non l'ha chiesta.
+        const pin = this.controllers.wiki.pinnedWiki;
+        if (pin && state.wiki && state.wiki !== pin) {
+          this.controllers.wiki.loadWikiPage(pin, 'index.md', false);
+        } else {
+          this.controllers.wiki.loadWikiPage(state.wiki, state.page || 'index.md', false);
+        }
+      } else if (state.mode === 'wiki') {
+        this.switchMode('wiki', false);
+        this.controllers.wiki.loadHome(false);
+      } else if (state.mode === 'graph') {
+        // Una sola sorgente di caricamento (v. requestGraph): prima qui si
+        // chiamava loadGraph *dopo* switchMode, che aveva già fatto partire
+        // quello di activate(). Un solo Indietro scatenava due fetch e due
+        // settleSimulation sincroni sul main thread.
+        this.requestGraph(state.wiki || null, false);
+      } else if (state.mode) {
+        this.switchMode(state.mode, false);
+      } else {
+        return;
+      }
+      // Sync URL with restored state
+      this.replaceNav(state);
+    });
+
+    // Persist mode changes
+    AppState.on('currentMode', (mode) => {
+      localStorage.setItem('mobile-last-mode', mode);
+    });
+
+    // Viewport height sync (Android keyboard fix)
+    this.setupViewportHeight();
+
+    // Keyboard scroll helpers
+    this.setupKeyboardHelpers();
+
+    // Horizontal swipe to navigate between dock tabs
+    this.setupSwipeNav();
+
+    // Determine initial mode
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlMode = urlParams.get('mode');
+    const savedMode = localStorage.getItem('mobile-last-mode');
+    let initialMode = urlMode || savedMode || 'chat';
+    const initialWiki = urlParams.get('wiki');
+    const initialPage = urlParams.get('page');
+
+    // If URL has wiki param but no explicit mode, force wiki mode
+    if (!urlMode && initialWiki) {
+      initialMode = 'wiki';
+    }
+
+    // Radice dello stack, marcata *prima* dei due await qui sotto. I listener
+    // del dock sono già registrati da un pezzo: un tap durante il boot impilava
+    // la propria entry sopra una radice non ancora marcata, e la marcatura
+    // tardiva la riscriveva con pos 0 riportando indietro la vista da sé — tap
+    // annullato in silenzio, e sotto una entry che _navPos non contava più.
+    this._navPos = 0;
+    this.replaceNav(this._navStateFor(initialMode, initialWiki, initialPage));
+
+    // Check first-run: redirect to onboarding (always when first_run is true)
+    let firstRunKnown = false;
+    try {
+      const settings = await api.getSettings();
+      firstRunKnown = true;
+      if (settings?.first_run) {
+        initialMode = 'onboarding';
+        localStorage.removeItem('onboarding-complete');
+        this._setFirstRunLock(true);
+      }
+    } catch (err) {
+      // "Non lo so" non è "onboarding già fatto". Se le impostazioni non si
+      // leggono (gateway a metà avvio, token non ancora valido, rete), trattare
+      // l'ignoto come configurazione completa cancellava il marcatore locale e
+      // portava in chat una Jenny senza provider, senza più alcuna strada verso
+      // il wizard. Qui si sospende il giudizio: nessuno stato viene riscritto,
+      // e il wizard resta raggiungibile da Impostazioni → "Riesegui
+      // configurazione" (v. `openOnboarding`). La contabilità vera è
+      // `firstRunKnown`, che resta false: qui basta lasciarne traccia nel log.
+      api.clientLog('warning', 'boot-first-run',
+        `settings unavailable at boot: ${err?.message || err}`);
+    }
+
+    // After onboarding completed: force chat mode, clear stale state.
+    // Solo se sappiamo davvero che il primo avvio è alle spalle: consumare il
+    // marcatore su un "non lo so" lo perde per sempre.
+    if (firstRunKnown && !this._firstRun && localStorage.getItem('onboarding-complete')) {
+      localStorage.removeItem('onboarding-complete');
+      localStorage.setItem('mobile-last-mode', 'chat');
+      initialMode = 'chat';
+    }
+
+    // Initialize sessions and load module
+    await this._initSessions();
+
+    // Un tap sul dock durante i due await qui sopra ha già scelto la vista e
+    // impilato la propria entry sopra la radice (marcata prima di partire):
+    // quella pressione va onorata, non annullata. Il primo avvio è l'unica
+    // eccezione — finché l'onboarding non è finito la navigazione è bloccata,
+    // quindi la vista scelta dal tap non è una destinazione lecita.
+    if (!this.currentMode || this._firstRun) {
+      // Il grafo iniziale si annuncia *prima* dello switch: è activate() a
+      // caricarlo. Chiamare loadGraph dopo switchMode significava caricarlo due
+      // volte, la prima con il wiki sbagliato (quello di default del controller).
+      if (initialMode === 'graph') {
+        this._pendingGraph = { wiki: initialWiki || null, push: false };
+      }
+      // La entry iniziale *è* già la vista iniziale: va riscritta, non
+      // impilata. Prima si faceva replaceState + switchMode(push) e restavano
+      // due entry identiche, così il primo Indietro veniva ingoiato da
+      // switchMode (`mode === currentMode`) senza cambiare niente a schermo —
+      // da lì la sensazione che il tasto "salti" una pagina. Si riscrive di
+      // nuovo perché `initialMode` può essere cambiato durante gli await
+      // (primo avvio → onboarding, onboarding appena concluso → chat).
+      this._navPos = 0;
+      this.replaceNav(this._navStateFor(initialMode, initialWiki, initialPage));
+      this.switchMode(initialMode, false);
+    }
+
+    // Register keyboard shortcuts
+    this._initKeyboardShortcuts();
+
+    console.log('Mobile app initialized');
+  }
+
+  _updateSidebarTitles() {
+    const titleMap = {
+      'chat': 'nav.chat',
+      'workspace': 'nav.workspace',
+      'apps': 'nav.apps',
+      'settings': 'nav.settings',
+      'graph': 'nav.wiki',
+      'wiki': 'nav.wiki',
+      'onboarding': 'nav.onboarding',
+    };
+    document.querySelectorAll('.dock-item[data-mode]').forEach(item => {
+      const key = titleMap[item.dataset.mode];
+      if (key) item.title = i18n.t(key);
+    });
+  }
+
+  _applyStaticTranslations() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      el.textContent = i18n.t(el.dataset.i18n);
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+      el.placeholder = i18n.t(el.dataset.i18nPlaceholder);
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+      el.title = i18n.t(el.dataset.i18nTitle);
+    });
+    document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+      el.setAttribute('aria-label', i18n.t(el.dataset.i18nAria));
+    });
+  }
+
+  setupViewportHeight() {
+    const app = document.querySelector('.app');
+    const setH = () => {
+      if (!window.visualViewport) return;
+      app.style.height = window.visualViewport.height + 'px';
+      window.scrollTo(0, 0);
+    };
+    window.visualViewport?.addEventListener('resize', setH);
+    setH();
+  }
+
+  setupKeyboardHelpers() {
+    // Ensure inputs stay visible when keyboard opens
+    const modes = ['chat', 'workspace'];
+    modes.forEach(mode => {
+      const view = document.getElementById(`view-${mode}`);
+      if (!view) return;
+      const input = view.querySelector('input, textarea');
+      if (input) {
+        input.addEventListener('focus', () => ensureVisible(input));
+      }
+    });
+  }
+
+  async _initSessions() {
+    try {
+      await sessionManager.init();
+    } catch (err) {
+      console.error('Failed to init sessions:', err);
+    }
+    // Il chip dello scope si accende comunque: senza sessione mostra la
+    // personale, che e' lo stato giusto quando non c'e' niente da leggere.
+    scopeChip.init();
+    // Accanto al chip, e per la stessa ragione: senza sessione mostra lo stato
+    // di default (scrive), che è quello giusto quando non c'è niente da leggere.
+    writeSwitch.init();
+  }
+
+  _initKeyboardShortcuts() {
+    // Cmd/Ctrl+,: open settings
+    keyboard.register('mod+,', () => {
+      this.switchMode('settings');
+    });
+
+    // Escape: stessa catena del tasto Indietro hardware. Sul Titan 2 la
+    // tastiera fisica è sempre sotto le dita, quindi Esc *è* la scorciatoia
+    // primaria: quando copriva solo drawer e dialog sembrava funzionare ed era
+    // inerte su mini-app, minichat, lightbox, sotto-stato di sezione e history.
+    keyboard.register('escape', () => {
+      this.handleHardwareBack();
+    });
+  }
+
+  /* ── Navigazione: stack unico ──────────────────────────────────────────
+     Unico punto di scrittura della history. L'URL è *derivato* dallo stato,
+     mai il contrario, così una entry ripristinata da popstate riproduce
+     esattamente la schermata che l'aveva spinta. */
+
+  _navUrl(state) {
+    const url = new URL(window.location);
+    url.searchParams.set('mode', state.mode);
+    if (state.wiki) url.searchParams.set('wiki', state.wiki);
+    else url.searchParams.delete('wiki');
+    if (state.page) url.searchParams.set('page', state.page);
+    else url.searchParams.delete('page');
+    return url;
+  }
+
+  /** Stato di navigazione per una vista (usato al boot e dai controller). */
+  _navStateFor(mode, wiki, page) {
+    if (mode === 'wiki' && wiki) return { mode: 'wiki', wikiPage: true, wiki, page: page || 'index.md' };
+    if (mode === 'graph' && wiki) return { mode: 'graph', wiki };
+    return { mode };
+  }
+
+  /** Impila una nuova schermata. Impilare due volte la stessa (ritap sullo
+      stesso link, doppio tap sulla stessa voce) è la ricetta per una pressione
+      di Indietro che non cambia niente: in quel caso si riscrive e basta. */
+  pushNav(state) {
+    const cur = history.state;
+    if (cur && cur.mode === state.mode
+        && (cur.wiki || null) === (state.wiki || null)
+        && (cur.page || null) === (state.page || null)) {
+      this.replaceNav(state);
+      return;
+    }
+    this._navPos += 1;
+    history.pushState({ ...state, pos: this._navPos }, '', this._navUrl(state));
+  }
+
+  /** Riscrive la schermata corrente senza impilarne una nuova. */
+  replaceNav(state) {
+    history.replaceState({ ...state, pos: this._navPos }, '', this._navUrl(state));
+  }
+
+  /* ── I livelli sopra la vista: una definizione sola ─────────────────────
+     "Cosa sta sopra" era scritto in quattro posti che divergevano — il back
+     hardware, goHome, la shortcut Escape e la guardia del type-ahead della
+     chat — e ogni divergenza era un difetto: Home lasciava aperta la lightbox
+     e scavalcava i dialog non annullabili, Esc copriva due livelli su cinque,
+     la chat rimetteva il fuoco su un composer coperto. Da qui in poi l'elenco
+     è uno, e i quattro consumatori lo percorrono.
+
+     L'ordine è quello di sovrapposizione reale (z-index in mobile-style.css:
+     .app-frame-overlay 110 · .jenny-scrim 119 · .jenny-duo 120 · .jenny-mc 121
+     · .image-lightbox 1000; `.app` non crea stacking context). La minichat
+     copre la mini-app, quindi va consumata *prima*: l'ordine opposto chiudeva
+     l'app che stava sotto lasciando a schermo la minichat, cioè una pressione
+     senza alcun cambiamento visibile.
+
+     Ogni livello espone:
+       present()  test di presenza, senza effetti collaterali;
+       dismiss()  chiusura di un passo (semantica del tasto Indietro); ritorna
+                  false se non ha consumato niente, e allora la catena prosegue
+                  invece di ingoiare la pressione;
+       close()    smontaggio completo (semantica di Home), default = dismiss. */
+  _overlayLayers() {
+    return [
+      {
+        // <dialog> modali e sheet: con showModal() vivono nel top layer, sopra
+        // qualunque z-index.
+        name: 'dialog',
+        present: () => !!document.querySelector('dialog[open]'),
+        dismiss: () => this._dismissTopDialog(),
+      },
+      {
+        // Lightbox immagini: overlay normale, ma si chiude solo col proprio
+        // handler — remove() salterebbe il cleanup (onClose, che revoca gli
+        // object URL del workspace).
+        name: 'lightbox',
+        present: () => !!document.querySelector('.image-lightbox'),
+        dismiss: () => {
+          const lightbox = document.querySelector('.image-lightbox');
+          if (!lightbox) return;
+          if (typeof lightbox.__jennyClose === 'function') lightbox.__jennyClose();
+          else lightbox.remove();
+        },
+      },
+      {
+        // Minichat della mascotte.
+        name: 'minichat',
+        present: () => !!document.querySelector('.jenny-mc.open'),
+        dismiss: () => this.jenny?.handleBack() ?? false,
+      },
+      {
+        // Mini-app aperta: gestisce la propria navigazione interna e, all'ultimo
+        // livello, si chiude. Home invece la smonta e basta. L'overlay resta nel
+        // DOM per i 200 ms della dissolvenza di chiusura: lì handleBack ritorna
+        // false e la catena prosegue, che è meglio di una pressione ingoiata.
+        name: 'miniapp',
+        present: () => !!document.querySelector('.app-frame-overlay'),
+        dismiss: () => this.controllers.apps?.handleBack() ?? false,
+        close: () => { this.controllers.apps?.closeApp(); },
+      },
+      {
+        // Il cassetto delle app. Sta *sotto* la mini-app — un'app aperta dal
+        // foglio lo copre, e Indietro deve chiudere prima l'app — e *sopra* il
+        // drawer, che è laterale e non copre il lanciatore. `present()` legge
+        // un flag, non il DOM: il foglio resta nel DOM per i 320 ms della
+        // discesa, e su una lettura dal DOM il ciclo di _dismissAllOverlays lo
+        // richiamerebbe otto volte a vuoto.
+        name: 'launcher',
+        present: () => this.launcher.isOpen(),
+        dismiss: () => { this.launcher.dismiss(); },
+        /* Dal passo 4 `dismiss` e `close` **non** coincidono più, e il default
+           `layer.close || layer.dismiss` non basta: Indietro (ed Esc, stessa
+           catena) svuota prima la ricerca e chiude solo a campo vuoto — due
+           passi, che sono giusti per una pressione dell'utente e sbagliati per
+           Home, che smonta e basta. Senza questa riga il ciclo di
+           `_dismissAllOverlays` arriverebbe comunque in fondo, ma in due giri
+           invece di uno: il conto di 1.8 lo direbbe. */
+        close: () => { this.launcher.close(); },
+      },
+      {
+        name: 'drawer',
+        present: () => !!this.drawer.activeDrawer,
+        dismiss: () => { this.drawer.closeAll(); },
+      },
+    ];
+  }
+
+  /** True se sopra la vista corrente c'è un overlay.
+   *
+   *  Con `belowLayer` la domanda diventa "c'è un overlay sopra *questo*
+   *  livello?", e si guardano solo i livelli che lo precedono nella catena.
+   *  Serve a chi un livello ce l'ha: il cassetto ascolta i tasti a foglio
+   *  aperto, e senza il parametro si escluderebbe da solo — `present()` del
+   *  proprio livello è vero per definizione mentre è a schermo. Un nome
+   *  sconosciuto degrada sulla domanda originale, che è la risposta prudente:
+   *  meglio cedere i tasti che rubarli.
+   *
+   *  @param {string|null} belowLayer nome del livello di chi chiede.
+   */
+  hasOverlayAbove(belowLayer = null) {
+    const layers = this._overlayLayers();
+    const stop = belowLayer ? layers.findIndex((layer) => layer.name === belowLayer) : -1;
+    const above = stop >= 0 ? layers.slice(0, stop) : layers;
+    return above.some((layer) => layer.present());
+  }
+
+  /* Congeda il <dialog> più in alto con la semantica di Esc: evento `cancel`
+     annullabile, e close() solo se nessuno l'ha rifiutato. C'è chi lo rifiuta
+     apposta — il dialog di riavvio dopo un restore non deve essere chiudibile —
+     e chiamare close() diretto, come facevano goHome e la shortcut Escape,
+     scavalca quel rifiuto. */
+  _dismissTopDialog() {
+    const dialogs = document.querySelectorAll('dialog[open]');
+    if (!dialogs.length) return;
+    const top = dialogs[dialogs.length - 1];
+    if (top.dispatchEvent(new Event('cancel', { cancelable: true }))) top.close();
+  }
+
+  /* Tasto Indietro hardware (MainActivity lo inoltra sempre qui: il guscio
+     nativo non ne gestisce nessun caso da solo).
+
+     Catena di consumatori, dal livello più in alto verso il basso: il primo che
+     consuma si ferma. L'invariante è che *una pressione = un cambiamento
+     visibile*, altrimenti il tasto sembra saltare le schermate. */
+  handleHardwareBack() {
+    // 1..5 — overlay sopra la vista. Il primo presente consuma la pressione:
+    // sotto un overlay non si naviga, altrimenti il cambiamento resta nascosto.
+    // Un livello che si dichiara presente ma non consuma (ritorna false) lascia
+    // proseguire la catena: meglio del livello successivo saltato in silenzio.
+    for (const layer of this._overlayLayers()) {
+      if (layer.present() && layer.dismiss() !== false) return;
+    }
+
+    // 6. Sotto-stato della sezione corrente (cartella del workspace, editor,
+    //    step dell'onboarding, popover Info sessione, focus sul grafo, catalogo
+    //    modelli): risalire di un livello dentro la sezione viene prima di
+    //    uscirne.
+    if (this.controllers[this.currentMode]?.handleBack?.()) return;
+
+    // 7. Schermata precedente.
+    if (this._navPos > 0) {
+      window.history.back();
+    }
+    // Alla radice non c'è niente sopra di noi: non si fa niente. Questa app è
+    // il launcher, quindi "indietro" non deve mai chiudere il task.
+  }
+
+  // Android Home button / home gesture. This app is the device launcher, so
+  // Home means "collapse to the home screen": dismiss every overlay layer,
+  // collapse each section's sub-state, and go to the home view — collapsing to
+  // the root of the navigation stack rather than pushing onto it. Not a no-op
+  // when already home: the sub-state still has to come down. Called from
+  // MainActivity.onNewIntent.
+  //
+  // Which view counts as "home" is a preference (default chat ✿, as it always
+  // was). 'last' means the user asked to be left wherever they were, so the
+  // overlays close and the view stays put.
+  /* Smonta *tutti* i livelli, non un sottoinsieme scritto a mano: è così che
+     si perdevano lightbox e minichat, e i dialog venivano chiusi con close()
+     diretto. Il ciclo interno serve ai livelli impilabili (più <dialog>); il
+     tetto evita che un livello che rifiuta di chiudersi — il dialog di riavvio
+     dopo un restore fa preventDefault apposta — mandi il chiamante in loop. */
+  _dismissAllOverlays() {
+    for (const layer of this._overlayLayers()) {
+      const dismiss = layer.close || layer.dismiss;
+      for (let i = 0; i < 8 && layer.present(); i++) dismiss();
+    }
+  }
+
+  goHome() {
+    this._dismissAllOverlays();
+    const target = homeView();
+    if (target === 'last') return;
+    // Gli overlay non sono tutto: le sezioni hanno un sotto-stato che
+    // sopravvive al cambio vista (l'editor del workspace resta montato e
+    // `activate()` lo ripropone al rientro, la griglia riapre l'ultima
+    // sottocartella). Home collassa anche quello — su *tutti* i controller già
+    // istanziati, perché la sezione stantia può essere sia quella che si lascia
+    // sia quella di destinazione.
+    Object.values(this.controllers).forEach((c) => c.collapseToRoot?.());
+    // Home *collassa* alla radice, non ci impila sopra un'altra schermata.
+    // Con lo switchMode di prima (push di default) la schermata iniziale
+    // diventava annullabile con Indietro — nessun launcher si comporta così —
+    // e lo stack non calava mai: dieci Home = dieci entry, tutte da smaltire
+    // una pressione alla volta prima di arrivare al fondo.
+    this.switchMode(target, false);
+    // Il blocco del primo avvio può aver dirottato lo switch sull'onboarding:
+    // in quel caso la radice non descrive la vista home, e marcarla comunque
+    // scriverebbe nella entry corrente una schermata che non è a schermo.
+    if (this.currentMode !== target) return;
+    this._navPos = 0;
+    this.replaceNav(this._navStateFor(target, null, null));
+  }
+
+  /* Tap sulla notifica di un messaggio proattivo (MainActivity). Non è "vai a
+     casa e poi in chat": quella composizione lasciava la entry di radice a
+     descrivere la *vista home* mentre a schermo c'era la chat, e con una vista
+     home diversa da chat il primo Indietro atterrava dove l'utente non era mai
+     stato — più un activate/deactivate di troppo sul controller di mezzo.
+     Qui la chat *diventa* la radice. Ritorna false se non ci si è arrivati (il
+     blocco del primo avvio dirotta sull'onboarding), così il guscio nativo sa
+     che non deve ancora cancellare la notifica. */
+  openChat() {
+    this._dismissAllOverlays();
+    Object.values(this.controllers).forEach((c) => c.collapseToRoot?.());
+    this.switchMode('chat', false);
+    if (this.currentMode !== 'chat') return false;
+    this._navPos = 0;
+    this.replaceNav(this._navStateFor('chat', null, null));
+    return true;
+  }
+
+  /** Torna alla schermata precedente se ce n'è una nostra sotto, altrimenti
+      atterra su `fallbackMode` riscrivendo la entry corrente. Serve a chi deve
+      *tornare* dove si trovava (la freccia ← dell'header del workspace, quando
+      l'editor è stato aperto da un'altra sezione): impilare una entry in avanti
+      mentre si va indietro è l'opposto di ciò che fa il tasto Indietro con lo
+      stesso stato, e lascia dietro una pressione che non cambia niente. */
+  navigateBack(fallbackMode) {
+    if (this._navPos > 0) {
+      window.history.back();
+      return;
+    }
+    if (!fallbackMode || fallbackMode === this.currentMode) return;
+    this.switchMode(fallbackMode, false);
+    this.replaceNav(this._navStateFor(fallbackMode, null, null));
+  }
+
+  // Un'app di sistema è stata installata o disinstallata (kind: 'added' |
+  // 'removed'). Chiamato da MainActivity, che ascolta i broadcast del
+  // PackageManager. Se né la scheda né il cassetto sono mai stati aperti non
+  // c'è niente da aggiornare: la lista verrà caricata fresca alla prima volta.
+  onPackageChanged(kind, packageName) {
+    this.controllers.apps?.onPackageChanged(kind, packageName);
+  }
+
+  /** Il proprietario dei dati delle app (D5), costruito anche a scheda mai
+   *  aperta.
+   *
+   *  `switchMode` costruisce i controller pigramente, quindi finché l'utente non
+   *  entrava nella sezione App `AppsController` non esisteva — e il cassetto si
+   *  sarebbe aperto vuoto. Qui la costruzione è la stessa (`controllerFactories`
+   *  resta l'unica ricetta) ma slegata dal fatto che `view-apps` sia a schermo:
+   *  il controller scrive nel DOM della scheda, che sta in pagina fin dal boot,
+   *  nascosto. Registrarlo in `this.controllers` è la parte che conta: da lì lo
+   *  ritrova `switchMode` — che non ne costruirà un secondo — e ci arriva
+   *  `onPackageChanged`. */
+  appsController() {
+    if (!this.controllers.apps) {
+      try {
+        this.controllers.apps = this.controllerFactories.apps();
+      } catch (err) {
+        console.error('Failed to init apps controller:', err);
+        return null;
+      }
+    }
+    return this.controllers.apps;
+  }
+
+  /* Ingresso unico nella sezione grafo con una vista precisa.
+     `GraphController.activate()` è l'unico punto in cui il grafo si carica: la
+     vista voluta va depositata *prima* di switchMode, perché activate() viene
+     invocato sincronamente da lì. Prima ogni chiamante faceva
+     `switchMode('graph', false)` seguito da `loadGraph(...)`, e activate()
+     aveva già caricato per conto suo — due fetch e due `settleSimulation`
+     sincroni sul main thread per una sola pressione di Indietro. */
+  requestGraph(wiki, push = false) {
+    this._pendingGraph = { wiki: wiki || null, push };
+    this.switchMode('graph', false);
+    // switchMode non fa niente se siamo già sul grafo: in quel caso nessun
+    // activate() ha consumato la richiesta, e la serviamo qui.
+    const pending = this.takePendingGraph();
+    if (pending) this.controllers.graph?.loadGraph(pending.wiki, pending.push);
+  }
+
+  /** Consuma la richiesta depositata (null se non ce n'è). */
+  takePendingGraph() {
+    const pending = this._pendingGraph;
+    this._pendingGraph = null;
+    return pending;
+  }
+
+  /** Blocco del dock durante il primo avvio, in un interruttore solo.
+   *
+   *  Prima esisteva solo il ramo che *accende*: `grep -rn nav-disabled` dava
+   *  due righe, una che aggiungeva la classe e una che la leggeva, e nessuna
+   *  che la togliesse — né toglieva `pointer-events: none`, l'opacità 0.4 o la
+   *  voce onboarding dal dock. Finito il wizard, l'unica cosa che sbloccava
+   *  l'interfaccia era il reload che segue: qualunque percorso che completasse
+   *  l'onboarding senza ricaricare (il ripristino da backup) lasciava il dock
+   *  spento a tempo indeterminato. Un blocco a senso unico è un blocco che non
+   *  si sa togliere: qui accensione e spegnimento sono lo stesso codice. */
+  _setFirstRunLock(on) {
+    this._firstRun = !!on;
+    const navOnb = document.getElementById('nav-onboarding');
+    if (navOnb) navOnb.style.display = on ? '' : 'none';
+    document.querySelectorAll('.dock-item[data-mode]').forEach((item) => {
+      if (item.dataset.mode === 'onboarding') return;
+      item.classList.toggle('nav-disabled', !!on);
+      item.style.pointerEvents = on ? 'none' : '';
+      item.style.opacity = on ? '0.4' : '';
+    });
+  }
+
+  /** Riapre il wizard di configurazione a configurazione già fatta
+   *  (Impostazioni → "Riesegui configurazione"), che è anche l'unica strada
+   *  quando il boot non è riuscito a stabilire se il primo avvio fosse alle
+   *  spalle. La voce del dock esiste ma è nascosta fuori dal primo avvio: va
+   *  mostrata, altrimenti la sezione resta a schermo senza un'ancora attiva. */
+  openOnboarding() {
+    const navOnb = document.getElementById('nav-onboarding');
+    if (navOnb) navOnb.style.display = '';
+    this.switchMode('onboarding');
+    // Dopo lo switch: il controller è lazy e viene costruito lì dentro.
+    this.controllers.onboarding?.markRerun();
+  }
+
+  /** Apre il cassetto delle app (pulsante nella riga del composer, D1).
+   *
+   *  Il blocco del primo avvio vale anche qui, con la stessa guardia di
+   *  `switchMode`: finché l'onboarding non è finito non si va da nessuna
+   *  parte, e un foglio che si apre sopra il wizard è una strada per uscirne
+   *  senza averlo finito. Si dirotta invece di ignorare, esattamente come fa
+   *  `switchMode`: durante il primo avvio la vista è già `onboarding`, quindi
+   *  a schermo non cambia niente. */
+  openLauncher() {
+    if (!localStorage.getItem('onboarding-complete') && this._firstRun) {
+      console.warn('Onboarding not complete - redirecting to onboarding');
+      this.switchMode('onboarding');
+      return;
+    }
+    this.launcher.open();
+  }
+
+  switchMode(mode, pushState = true) {
+    // Block ANY navigation if onboarding is not complete
+    if (mode !== 'onboarding' && !localStorage.getItem('onboarding-complete') && this._firstRun) {
+      console.warn('Onboarding not complete - redirecting to onboarding');
+      this.switchMode('onboarding', pushState);
+      return;
+    }
+
+    if (mode === this.currentMode) return;
+    if (!this.controllerFactories[mode]) {
+      console.warn(`Unknown mode: ${mode}`);
+      return;
+    }
+
+    // Lazy init controller
+    if (!this.controllers[mode]) {
+      try {
+        this.controllers[mode] = this.controllerFactories[mode]();
+      } catch (err) {
+        console.error(`Failed to init ${mode} controller:`, err);
+        showToast(i18n.t('common.failedToLoadMode', { mode }), 'error');
+        return;
+      }
+    }
+
+    // Hide all views
+    document.querySelectorAll('.view').forEach(v => {
+      v.style.display = 'none';
+    });
+
+    // Show target view
+    const view = document.getElementById(`view-${mode}`);
+    if (view) {
+      view.style.display = 'flex';
+    }
+
+    // Update sidebar active state. La sezione Wiki ha come dock-mode "graph"
+    // (landing di default); resta attiva anche nella vista pagina ("wiki").
+    document.querySelectorAll('.dock-item').forEach(item => {
+      const isWikiSection = (mode === 'graph' || mode === 'wiki') && item.dataset.mode === 'graph';
+      item.classList.toggle('active', item.dataset.mode === mode || isWikiSection);
+    });
+
+    // Update header
+    this.header.setMode(mode);
+
+    // Notify controllers
+    if (this.controllers[this.currentMode]) {
+      this.controllers[this.currentMode].deactivate();
+    }
+    this.currentMode = mode;
+    const next = this.controllers[mode];
+    if (next.ready) {
+      next.ready.then(() => next.activate());
+    } else {
+      next.activate();
+    }
+
+    // Close any open drawer
+    this.drawer.closeAll();
+    // …e il cassetto delle app, per la stessa ragione: è ancorato alla vista
+    // che si sta lasciando, e restare aperto sopra quella nuova sarebbe un
+    // overlay orfano che nessuno ha chiesto.
+    this.launcher.close();
+
+    /* La modalità corrente anche su <html>: serve al CSS, che altrimenti non
+       ha modo di sapere quale vista è a schermo (le viste si mostrano con un
+       `display` inline, non con una classe che risalga). Gancio generale, non
+       un caso speciale: la prima cosa che ne ha bisogno è la mascotte, v.
+       `:root.mode-apps .jenny-duo` in mobile-style.css. */
+    document.documentElement.classList.forEach((c) => {
+      if (c.startsWith('mode-')) document.documentElement.classList.remove(c);
+    });
+    document.documentElement.classList.add(`mode-${mode}`);
+
+    // Update state and URL
+    AppState.set('currentMode', mode);
+    if (pushState) {
+      // La vista graph ricorda il proprio wiki (activate() lo ricarica): senza
+      // riportarlo nello stato, tornare qui col back mostrerebbe un grafo che
+      // l'URL non descrive.
+      const wiki = mode === 'graph' ? this.controllers.graph?.currentWiki : null;
+      this.pushNav(wiki ? { mode, wiki } : { mode });
+    }
+  }
+
+  // Ordered list of navigable modes, derived from the dock DOM order.
+  // Skips hidden (onboarding when not first-run) and disabled items.
+  _visibleModes() {
+    return Array.from(document.querySelectorAll('.dock-item[data-mode]'))
+      .filter(el => el.style.display !== 'none' && !el.classList.contains('nav-disabled'))
+      .map(el => el.dataset.mode);
+  }
+
+  // Walk up from `target` to `boundary` looking for a horizontally scrollable
+  // ancestor that can still scroll in the gesture direction. If found, the
+  // gesture belongs to that scroller (native scroll), not to tab navigation.
+  _insideHScroll(target, dx, boundary) {
+    let el = target;
+    while (el && el !== boundary && el !== document.body) {
+      if (el.scrollWidth > el.clientWidth + 2) {
+        const overflowX = getComputedStyle(el).overflowX;
+        if (overflowX === 'auto' || overflowX === 'scroll') {
+          const atStart = el.scrollLeft <= 0;
+          const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+          // dx > 0 (finger right) scrolls content toward its start;
+          // dx < 0 (finger left) scrolls toward its end.
+          if (dx > 0 && !atStart) return true;
+          if (dx < 0 && !atEnd) return true;
+        }
+      }
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  // Global horizontal swipe on the content area to move between dock tabs.
+  // The current view follows the finger (damped) as an affordance; on release
+  // past a threshold it commits with a crisp slide-in of the target view,
+  // otherwise it springs back. See plan: "carosello a step".
+  setupSwipeNav() {
+    const main = document.querySelector('.main');
+    if (!main) return;
+
+    // Grayout veil layered above the peeking view (see .swipe-scrim CSS).
+    const scrim = document.createElement('div');
+    scrim.className = 'swipe-scrim';
+    scrim.setAttribute('aria-hidden', 'true');
+    main.appendChild(scrim);
+    const setScrim = (opacity, animate) => {
+      scrim.style.transition = animate ? 'opacity .22s ease' : 'none';
+      scrim.style.opacity = String(opacity);
+    };
+
+    const H_SLOP = 10;       // px of travel before deciding the gesture is horizontal
+    const PEEK = 0.13;       // asymptotic peek offset toward a neighbor (fraction of width)
+    const EDGE_PEEK = 0.05;  // asymptotic peek offset at the ends
+
+    // Exponential rubber-band: responsive near 0, decelerating toward `max`.
+    const rubber = (delta, max) => {
+      if (!max) return 0;
+      const sign = delta < 0 ? -1 : 1;
+      return sign * max * (1 - Math.exp(-Math.abs(delta) / (max * 1.8)));
+    };
+
+    let startX = 0, startY = 0, startT = 0;
+    let tracking = false;       // a candidate gesture is in progress
+    let horizontal = null;      // null = undecided; true once committed to horizontal
+    let view = null;            // the current view element being dragged
+    let neighbors = null;       // { prev, next } modes
+    let startTarget = null;
+
+    const reset = () => {
+      tracking = false; horizontal = null; view = null; neighbors = null; startTarget = null;
+    };
+
+    const clearView = (el) => {
+      if (!el) return;
+      el.style.transition = '';
+      el.style.willChange = '';
+      el.style.transform = '';
+      el.style.filter = '';
+    };
+
+    main.addEventListener('touchstart', (e) => {
+      reset();
+      if (e.touches.length !== 1) return;
+      // Guard: onboarding lock — navigation is blocked during first run.
+      if (this._firstRun && !localStorage.getItem('onboarding-complete')) return;
+      // Guard: an open drawer owns its own (vertical) swipe.
+      if (this.drawer.activeDrawer) return;
+
+      view = document.getElementById(`view-${this.currentMode}`);
+      if (!view) return;
+
+      const modes = this._visibleModes();
+      const idx = modes.indexOf(this.currentMode);
+      if (idx === -1) return; // e.g. graph/onboarding aren't in the dock — no swipe nav
+
+      neighbors = {
+        prev: idx > 0 ? modes[idx - 1] : null,
+        next: idx < modes.length - 1 ? modes[idx + 1] : null,
+      };
+      const t = e.touches[0];
+      startX = t.clientX; startY = t.clientY; startT = Date.now();
+      startTarget = e.target;
+      tracking = true;
+    }, { passive: true });
+
+    main.addEventListener('touchmove', (e) => {
+      if (!tracking) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+
+      if (horizontal === null) {
+        if (Math.abs(dx) < H_SLOP && Math.abs(dy) < H_SLOP) return;
+        if (Math.abs(dx) <= Math.abs(dy)) { reset(); return; } // vertical → let it scroll
+        if (this._insideHScroll(startTarget, dx, main)) { reset(); return; }
+        horizontal = true;
+        view.style.transition = 'none';
+        view.style.willChange = 'transform';
+      }
+
+      e.preventDefault(); // we own the gesture now (listener is passive:false)
+
+      const goingPrev = dx > 0;
+      const hasNeighbor = goingPrev ? neighbors.prev : neighbors.next;
+      const w = main.clientWidth || window.innerWidth;
+      const max = w * (hasNeighbor ? PEEK : EDGE_PEEK);
+      const tx = rubber(dx, max);
+      // Progress toward the asymptote drives the grayout + slight recede.
+      const progress = hasNeighbor && max ? Math.min(1, Math.abs(tx) / max) : 0;
+      view.style.transform = `translateX(${tx.toFixed(2)}px)`;
+      setScrim(progress, false);
+    }, { passive: false });
+
+    const finish = (e) => {
+      if (!tracking) return;
+      const el = view;
+      const nb = neighbors;
+      const wasHorizontal = horizontal === true;
+      if (!wasHorizontal || !el) { reset(); return; }
+
+      const changed = (e.changedTouches && e.changedTouches[0]) || null;
+      const endX = changed ? changed.clientX : startX;
+      const dx = endX - startX;
+      const dt = Math.max(1, Date.now() - startT);
+      const vx = dx / dt; // px per ms
+      const w = main.clientWidth || window.innerWidth;
+      const threshold = Math.max(60, w * 0.22);
+      const goingPrev = dx > 0;
+      const target = goingPrev ? nb.prev : nb.next;
+      const commit = !!target && (Math.abs(dx) > threshold || Math.abs(vx) > 0.5);
+
+      reset();
+
+      if (commit) {
+        setScrim(0, false);         // new view must not inherit the veil
+        clearView(el);              // old view is about to be hidden by switchMode
+        this.switchMode(target);
+        this._animateSlideIn(document.getElementById(`view-${target}`), goingPrev);
+      } else {
+        // Spring back to rest (offset and grayout fade together).
+        setScrim(0, true);
+        el.style.transition = 'transform .22s cubic-bezier(.22,.61,.36,1)';
+        el.style.transform = 'translateX(0)';
+        const onEnd = () => { clearView(el); el.removeEventListener('transitionend', onEnd); };
+        el.addEventListener('transitionend', onEnd);
+      }
+    };
+
+    main.addEventListener('touchend', finish, { passive: true });
+    main.addEventListener('touchcancel', () => {
+      if (horizontal && view) { setScrim(0, false); clearView(view); }
+      reset();
+    }, { passive: true });
+  }
+
+  // Slide the freshly-shown view in from the swipe direction.
+  // goingPrev → came from the left; otherwise from the right.
+  _animateSlideIn(view, goingPrev) {
+    if (!view) return;
+    const from = goingPrev ? '-100%' : '100%';
+    view.style.filter = '';
+    view.style.transition = 'none';
+    view.style.willChange = 'transform';
+    view.style.transform = `translateX(${from})`;
+    void view.offsetWidth; // force reflow so the start transform sticks
+    view.style.transition = 'transform .2s cubic-bezier(.22,.61,.36,1)';
+    view.style.transform = 'translateX(0)';
+    const onEnd = () => {
+      view.style.transition = '';
+      view.style.willChange = '';
+      view.style.transform = '';
+      view.removeEventListener('transitionend', onEnd);
+    };
+    view.addEventListener('transitionend', onEnd);
+  }
+}
+
+// Initialize when DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  new MobileApp();
+});

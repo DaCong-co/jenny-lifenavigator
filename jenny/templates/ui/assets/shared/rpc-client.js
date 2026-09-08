@@ -1,0 +1,51 @@
+/** Comandi con payload verso il gateway (RPC sul WebSocket).
+ *
+ *  Gemello di `api-client.js` e divisione del lavoro precisa:
+ *
+ *    - `api`  → letture e operazioni con parametri corti, su /api/ (HTTP GET);
+ *    - `rpc`  → operazioni che portano *contenuto* (il testo di un file, una
+ *               nota libera), sul WebSocket.
+ *
+ *  Il motivo non è stilistico. La superficie /api/ del gateway è servita
+ *  dall'hook di handshake di `websockets`, che non legge mai il body di una
+ *  richiesta: i parametri possono viaggiare solo nella query string o negli
+ *  header, dove stanno 8192 byte per riga e solo caratteri ISO-8859-1 —
+ *  `new Headers()` rifiuta un'emoji prima ancora di spedire. Salvare `SOUL.md`
+ *  da lì era impossibile. Un frame WebSocket invece è framed e UTF-8.
+ *
+ *  Ogni metodo qui corrisponde a un comando in `jenny/webui/commands.py`.
+ */
+
+import { wsManager } from './ws-manager.js';
+
+export const rpc = {
+  /** Salva un file di testo del workspace (tetto 1 MB, lato server). */
+  writeWorkspaceFile(path, content) {
+    return wsManager.request('workspace.write', { path, content });
+  },
+
+  /** Crea un progetto: una wiki nuova e vuota, piu' la riga di scope che
+   *  l'utente ha scritto. Passa da qui e non da `api` proprio per quella riga:
+   *  e' testo libero, e la superficie /api/ non sa trasportarne. */
+  createProject(name, seed, conversation) {
+    return wsManager.request('project.create', { name, seed, conversation });
+  },
+
+  /** Cancella un progetto: l'albero della wiki **e** la sua conversazione.
+   *
+   *  Non e' `api.deleteWorkspace` su `wikis/<nome>`, ed e' il punto di tutto:
+   *  quella toglie una cartella e non sa cosa sia un progetto, quindi lasciava
+   *  la chat sotto un nome ormai libero e il progetto successivo con lo stesso
+   *  nome se la riprendeva (difetto del 24/08/2026). Il server rifiuta ormai
+   *  quella strada; questa e' l'altra. */
+  deleteProject(name) {
+    return wsManager.request('project.delete', { name });
+  },
+
+  /** Chiude un item di audit con una nota di risoluzione. */
+  resolveAudit(auditId, wiki, resolution) {
+    return wsManager.request('audit.resolve', {
+      audit_id: auditId, wiki, resolution,
+    });
+  },
+};

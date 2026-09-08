@@ -1,0 +1,68 @@
+"""Progress callback helpers for user-visible output.
+
+These helpers convert agent progress callbacks into outbound chat messages.
+Runtime state notifications such as turn lifecycle and model changes live in
+``jenny.bus.runtime_events``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from jenny.bus.events import InboundMessage, OutboundMessage
+from jenny.bus.queue import MessageBus
+
+
+def build_silent_progress_callback() -> Callable[..., Awaitable[None]]:
+    """Callback di progress che non pubblica niente.
+
+    Serve ai turni silenziosi (:mod:`jenny.session.turn_visibility`): il progress
+    e' indirizzato alla chat d'origine e viene *persistito* nel transcript, quindi
+    un turno che promette silenzio non puo' installare quello del bus. Non basta
+    sopprimere l'outbound finale — le righe di attivita e i delta di reasoning
+    comparirebbero comunque in chat.
+    """
+
+    async def _drop(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    return _drop
+
+
+def build_bus_progress_callback(
+    bus: MessageBus,
+    msg: InboundMessage,
+) -> Callable[..., Awaitable[None]]:
+    """Return a callback that publishes progress as outbound messages."""
+
+    async def _publish_progress(
+        content: str,
+        *,
+        tool_hint: bool = False,
+        tool_events: list[dict[str, Any]] | None = None,
+        file_edit_events: list[dict[str, Any]] | None = None,
+        reasoning: bool = False,
+        reasoning_end: bool = False,
+    ) -> None:
+        meta = dict(msg.metadata or {})
+        meta["_progress"] = True
+        meta["_tool_hint"] = tool_hint
+        if reasoning:
+            meta["_reasoning_delta"] = True
+        if reasoning_end:
+            meta["_reasoning_end"] = True
+        if tool_events:
+            meta["_tool_events"] = tool_events
+        if file_edit_events:
+            meta["_file_edit_events"] = file_edit_events
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
+                metadata=meta,
+            )
+        )
+
+    return _publish_progress

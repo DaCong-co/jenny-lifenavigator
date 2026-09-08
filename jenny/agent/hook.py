@@ -1,0 +1,234 @@
+"""Shared lifecycle hook primitives for agent runs."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from loguru import logger
+
+from jenny.providers.base import LLMResponse, ToolCallRequest
+
+
+@dataclass(slots=True)
+class AgentHookContext:
+    """Mutable per-iteration state exposed to runner hooks."""
+
+    iteration: int
+    messages: list[dict[str, Any]]
+    response: LLMResponse | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+    tool_calls: list[ToolCallRequest] = field(default_factory=list)
+    tool_results: list[Any] = field(default_factory=list)
+    tool_events: list[dict[str, str]] = field(default_factory=list)
+    streamed_content: bool = False
+    streamed_reasoning: bool = False
+    final_content: str | None = None
+    stop_reason: str | None = None
+    error: str | None = None
+    session_key: str | None = None
+
+
+@dataclass(slots=True)
+class ToolResultHookContext:
+    """Esito di UNA tool call, consegnato a :meth:`AgentHook.after_execute_tool`.
+
+    Perche una dataclass propria e non :class:`AgentHookContext`: quello e stato
+    di *iterazione* e arriva una volta per batch, mentre questo arriva una volta
+    per **chiamata**. Con i tool concorrenti tre callback di questo tipo sono in
+    volo dentro la stessa iterazione, e schiacciarle in una lista condivisa e
+    esattamente la granularita sbagliata che questo hook esiste per correggere.
+
+    ``call_id`` e l'id di chiamata del provider: e cio che rende esatto
+    l'accoppiamento start/end quando lo stesso tool e in volo piu volte (tre
+    ``web_fetch`` nello stesso batch sono il caso normale, non un caso limite).
+
+    ``result`` ed ``error`` sono alternativi: ``error`` e valorizzato solo quando
+    il tool ha sollevato, negli altri casi il fallimento vive dentro ``result``
+    secondo la convenzione dei tool di Jenny (stringa che inizia per ``Error``).
+
+    ``arguments`` e ``result`` viaggiano **per riferimento** e vanno trattati
+    read-only: sono gli stessi oggetti che finiscono nella history del modello.
+    """
+
+    name: str
+    call_id: str
+    arguments: dict[str, Any]
+    result: Any = None
+    error: BaseException | str | None = None
+    duration_ms: int = 0
+
+
+@dataclass(slots=True)
+class AgentRunHookContext:
+    """Run-level state snapshot exposed to runner hooks."""
+
+    messages: list[dict[str, Any]]
+    final_content: str | None = None
+    tools_used: list[str] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
+    stop_reason: str | None = None
+    error: str | None = None
+    tool_events: list[dict[str, str]] = field(default_factory=list)
+    had_injections: bool = False
+    exception: BaseException | None = None
+
+
+class AgentHook:
+    """Minimal lifecycle surface for shared runner customization."""
+
+    def __init__(self, reraise: bool = False) -> None:
+        self._reraise = reraise
+
+    def wants_streaming(self) -> bool:
+        return False
+
+    def runs_when_ephemeral(self) -> bool:
+        """Se questo hook va montato anche su un turno **effimero**.
+
+        Un turno effimero e' lavoro interno che non lascia traccia nella
+        conversazione — Dream, la revisione, una passata del giardiniere —
+        e ``AgentLoop`` gli monta il solo hook di progresso, tenendo fuori quelli
+        registrati dall'esterno. Giusto per gli hook che *parlano* di un turno:
+        un effimero non ha nessuno a cui parlare.
+
+        **Ma non tutto quel che un hook fa e' parlare.** Chi misura non ha niente
+        a che vedere con la visibilita' del turno, e tenerlo fuori vuol dire non
+        misurare esattamente il lavoro che nessuno vede — che e' il lavoro che
+        conviene misurare di piu', perche' e' l'unico che l'utente non ha chiesto
+        e non vede arrivare. Misurato il 25/08: in **27 giorni** il bucket ``dream``
+        non era mai comparso una volta, con Dream che gira ogni due ore.
+
+        Default ``False``: chi entra qui deve dichiararlo, perche' la domanda
+        «questo hook ha senso senza un interlocutore?» va risposta una volta per
+        hook e non dedotta dal silenzio.
+        """
+        return False
+
+    async def before_run(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def after_run(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def on_error(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def on_finally(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        pass
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        pass
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        pass
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        pass
+
+    async def after_execute_tool(self, context: ToolResultHookContext) -> None:
+        """Una tool call e finita, bene o male. Default: no-op.
+
+        Contro-parte di :meth:`before_execute_tools`, ma per *chiamata* e non per
+        batch: prima di questo hook "questo tool ha finito" non era un evento
+        osservabile in nessun punto del codebase, e un tool da 8 secondi non
+        produceva un solo aggiornamento finche non finiva l'intera iterazione.
+
+        Puramente osservativo: il call site (``agent/tool_execution.py``) ne
+        isola le eccezioni, quindi un consumatore rotto non fa fallire la tool
+        call ne il turno. Non deve mutare ``context``.
+        """
+        pass
+
+    async def emit_reasoning(self, reasoning_content: str | None) -> None:
+        pass
+
+    async def emit_reasoning_end(self) -> None:
+        """Mark the end of an in-flight reasoning stream.
+
+        Hooks that buffer ``emit_reasoning`` chunks (for in-place UI updates)
+        flush and freeze the rendered group here. One-shot hooks ignore.
+        """
+        pass
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        pass
+
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        return content
+
+
+class CompositeHook(AgentHook):
+    """Fan-out hook that delegates to an ordered list of hooks.
+
+    Error isolation: async methods catch and log per-hook exceptions
+    so a faulty custom hook cannot crash the agent loop.
+    ``finalize_content`` is a pipeline (no isolation — bugs should surface).
+    """
+
+    __slots__ = ("_hooks",)
+
+    def __init__(self, hooks: list[AgentHook]) -> None:
+        super().__init__()
+        self._hooks = list(hooks)
+
+    def wants_streaming(self) -> bool:
+        return any(h.wants_streaming() for h in self._hooks)
+
+    def runs_when_ephemeral(self) -> bool:
+        return any(h.runs_when_ephemeral() for h in self._hooks)
+
+    async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
+        for h in self._hooks:
+            if getattr(h, "_reraise", False):
+                await getattr(h, method_name)(*args, **kwargs)
+                continue
+
+            try:
+                await getattr(h, method_name)(*args, **kwargs)
+            except Exception:
+                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_iteration", context)
+
+    async def before_run(self, context: AgentRunHookContext) -> None:
+        await self._for_each_hook_safe("before_run", context)
+
+    async def after_run(self, context: AgentRunHookContext) -> None:
+        await self._for_each_hook_safe("after_run", context)
+
+    async def on_error(self, context: AgentRunHookContext) -> None:
+        await self._for_each_hook_safe("on_error", context)
+
+    async def on_finally(self, context: AgentRunHookContext) -> None:
+        await self._for_each_hook_safe("on_finally", context)
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        await self._for_each_hook_safe("on_stream", context, delta)
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_execute_tools", context)
+
+    async def after_execute_tool(self, context: ToolResultHookContext) -> None:
+        await self._for_each_hook_safe("after_execute_tool", context)
+
+    async def emit_reasoning(self, reasoning_content: str | None) -> None:
+        await self._for_each_hook_safe("emit_reasoning", reasoning_content)
+
+    async def emit_reasoning_end(self) -> None:
+        await self._for_each_hook_safe("emit_reasoning_end")
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("after_iteration", context)
+
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        for h in self._hooks:
+            content = h.finalize_content(context, content)
+        return content
