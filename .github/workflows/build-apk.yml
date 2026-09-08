@@ -15,19 +15,36 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # AGP 8.7 + Gradle 8.9 要求 JDK 17。
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      # 确保 Android SDK 存在并接受 license；缺失的 platform/build-tools
-      # 由 Gradle 在构建时通过 sdkmanager 自动补齐。
+      # Chaquopy 构建需要一个与 `chaquopy.version = "3.11"` 匹配的
+      # 构建主机 Python；ubuntu-latest 默认是 3.12，没有 python3.11。
+      - name: Set up Python 3.11 (Chaquopy build Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ensure python3.11 is on PATH
+        run: |
+          ln -sf "$(command -v python3)" /usr/local/bin/python3.11
+          python3.11 --version
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      # 显式装 compileSdk 34 对应的 platform 并接受 license。build-tools
+      # 由 Gradle 在构建时按 AGP 8.7 的要求自动下载。
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" > /dev/null 2>&1 || true
 
       - name: Build debug APK
         working-directory: android
