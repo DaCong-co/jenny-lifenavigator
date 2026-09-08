@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from jenny.agent.tools.base import Tool, tool_parameters
-from jenny.life_model.store import LifeModelStore, _VALID_EVENT_KINDS
+from jenny.life_model.store import _VALID_EVENT_KINDS, LifeModelStore
 
 
 @tool_parameters({

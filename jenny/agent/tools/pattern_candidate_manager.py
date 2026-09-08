@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from jenny.agent.tools.base import Tool, tool_parameters
-from jenny.life_model.store import LifeModelStore, _VALID_CANDIDATE_STATUSES
+from jenny.life_model.store import _VALID_CANDIDATE_STATUSES, LifeModelStore
 
 _VALID_CONFIDENCE = ("low", "medium", "high")
 
