@@ -59,6 +59,9 @@
     "history": {
       "title": "Stampa la cronologia salvata"
     },
+    "navigator": {
+      "title": "Mostra cosa osserva il Life Navigator"
+    },
     "goal": {
       "title": "Trattalo come un obiettivo lungo"
     },

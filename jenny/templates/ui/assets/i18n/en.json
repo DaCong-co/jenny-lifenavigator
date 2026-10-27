@@ -59,6 +59,9 @@
     "history": {
       "title": "Print the saved history"
     },
+    "navigator": {
+      "title": "Show what the Life Navigator observes"
+    },
     "goal": {
       "title": "Treat this as a long-running goal"
     },
