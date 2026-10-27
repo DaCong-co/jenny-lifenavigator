@@ -119,6 +119,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
             "Read-only; the hourly cycle keeps running in the background."
         ),
         "radar",
+        "[notifications|usage]",
     ),
     BuiltinCommandSpec(
         "/goal",

@@ -114,6 +114,35 @@ def test_development_state_reads_the_life_model_without_quoting_it(tmp_path):
     assert dimension.evidence_ids
 
 
+def test_environment_state_reports_device_status(tmp_path):
+    store = NavigatorStore(tmp_path)
+    _add(store, "power", {
+        "battery_percent": 63, "charging": False, "screen_on": True,
+        "power_save": False, "network": "wifi", "uptime_s": 12345,
+    }, NOW)
+
+    snapshot = _aggregator(store, tmp_path).build(now=NOW)
+    joined = " ".join(snapshot.dimension("environment_state").facts)
+
+    assert "device battery 63%" in joined
+    assert "network=wifi" in joined
+
+
+def test_app_usage_can_move_behavioral_state(tmp_path):
+    store = NavigatorStore(tmp_path)
+    _add(store, "app_usage", {"package": "com.example", "minutes": 120},
+         NOW - timedelta(days=1))
+    for day in range(8, 14):
+        _add(store, "app_usage", {"package": "com.example", "minutes": 10},
+             NOW - timedelta(days=day))
+
+    snapshot = _aggregator(store, tmp_path).build(now=NOW)
+    dimension = snapshot.dimension("behavioral_state")
+
+    assert dimension.change == "changed"
+    assert any("app-usage" in fact for fact in dimension.facts)
+
+
 def test_navigator_effectiveness_marks_rejection(tmp_path):
     from jenny.navigator.models import OutcomeRecord
 

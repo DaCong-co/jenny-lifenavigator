@@ -93,6 +93,25 @@ async def cmd_navigator(ctx: CommandContext) -> OutboundMessage:
         from jenny.navigator.models import DIMENSION_KEYS
         from jenny.navigator.store import NavigatorStore
 
+        requested = ctx.args.strip().lower()
+        if requested in ("notifications", "notification", "usage"):
+            from jenny.navigator.android_perception import open_android_access_settings
+
+            kind = "notifications" if requested.startswith("notification") else "usage"
+            opened = await open_android_access_settings(kind)
+            content = (
+                f"Opened Android's {kind} access screen; enable Jenny there."
+                if opened else
+                f"Could not open the {kind} access screen on this device. "
+                "Use Android Settings → Apps → Special access."
+            )
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=content,
+                metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+            )
+
         store = NavigatorStore(workspace)
         snapshot = store.latest_snapshot()
         state = store.read_trigger_state()
@@ -101,6 +120,20 @@ async def cmd_navigator(ctx: CommandContext) -> OutboundMessage:
             from jenny.config.loader import load_config
             enabled = load_config().agents.defaults.navigator.enabled
             lines.append(f"Runtime: {'enabled' if enabled else 'disabled'}")
+        with suppress(Exception):
+            from jenny.navigator.android_perception import android_access_status
+            access = await android_access_status()
+            if access is not None:
+                lines.append(
+                    "Android access: notifications="
+                    f"{'on' if access['notifications'] else 'off'}, "
+                    f"usage={'on' if access['usage'] else 'off'}"
+                )
+                if not access["notifications"] or not access["usage"]:
+                    lines.append(
+                        "  → grant access in Android system settings; "
+                        "the next Navigator cycle picks it up."
+                    )
         if state.get("last_llm_at"):
             lines.append(f"Last analysis: {state['last_llm_at']}")
         else:

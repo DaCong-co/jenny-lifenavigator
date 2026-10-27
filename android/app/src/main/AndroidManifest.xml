@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Usage access is a special app-op, not a runtime prompt: the user grants
+         it in Android's "Usage access" settings. Only the Life Navigator reads
+         it, and only foreground app durations are kept. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Consente al foreground service di leggere la posizione anche a UI non in
@@ -147,6 +154,21 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="local_agent_runtime" />
+        </service>
+
+        <!-- Notification perception for the Life Navigator. Android binds this
+             service only after the user grants "notification access" in system
+             settings; without it no notification is captured. The service stores
+             a bounded, factual snapshot in app-private storage and never
+             interprets it. -->
+        <service
+            android:name=".JennyNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <!-- Espone i file del workspace ad app esterne per l'apertura col

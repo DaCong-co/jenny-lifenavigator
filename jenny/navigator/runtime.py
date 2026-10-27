@@ -30,6 +30,10 @@ from loguru import logger
 
 from jenny.life_model.store import LifeModelStore
 from jenny.navigator.aggregator import StateAggregator
+from jenny.navigator.android_perception import (
+    collect_android_observations,
+    collect_location_observation,
+)
 from jenny.navigator.core import CoreInputs, NavigatorCore
 from jenny.navigator.expression import ExpressionLayer
 from jenny.navigator.models import (
@@ -218,9 +222,11 @@ class NavigatorRuntime:
         trigger: TriggerEngine | None = None,
         permissions: PermissionLayer | None = None,
         expression: ExpressionLayer | None = None,
+        location_config: Any = None,
     ) -> None:
         self.agent = agent
         self.config = config
+        self.location_config = location_config
         default_workspace = getattr(agent, "workspace", None) or Path.cwd()
         self.workspace = Path(workspace) if workspace else Path(
             _config_value(config, "workspace_path", default_workspace)
@@ -266,6 +272,23 @@ class NavigatorRuntime:
         inbox = perception.drain_inbox()
         if inbox.files:
             logger.info("Navigator inbox: {}", inbox.summary())
+        android = await collect_android_observations(
+            perception,
+            self.config,
+            now=moment,
+            since=moment - timedelta(
+                minutes=max(15, int(_config_value(self.config, "interval_min", 60))),
+            ),
+        )
+        if android.total or android.errors:
+            logger.debug("Navigator Android: {}", android.summary())
+        location = False
+        if _config_bool(self.config, "capture_location", True):
+            location = await collect_location_observation(
+                perception, self.location_config, now=moment,
+            )
+        if location:
+            logger.debug("Navigator: location observation recorded")
 
         rules = RuleBook(self.store, now_fn=self._now_fn).effective(
             NavigatorRules.from_config(self.config)

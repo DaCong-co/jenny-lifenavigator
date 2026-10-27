@@ -281,13 +281,33 @@ effective_time`。运行时**不会自动改规则**：没有工具、没有后�
 
 ## 6. Android / 外部感知接入
 
-Phase 1 不要求所有健康数据接入。当前已启用：
+### 6.1 已实现（P0 + 基础系统状态）
 
 - 对话（每 turn，本地指标）
 - 时间（每日上下文）
-- 外部 JSON inbox（`navigator/inbox/`）
+- **通知**：`JennyNotificationListener.kt` 在用户授予“通知使用权”后收集通知，
+  写入 app-private 有界队列；Navigator 每小时 drain。写入 `navigator/` 的 observation
+  只保留 package/app/category/ongoing，**不保留标题和正文**；敏感应用进一步只留包名/应用名。
+- **App 使用**：`PerceptionBridge.kt` 用 `UsageEvents` 计算本 cycle 的前台分钟数，
+  不是累计日桶，所以不会每小时重复上报同一数字。需要“使用情况访问”特殊权限。
+- **系统状态**：电量、充电、亮屏、省电模式、网络类型、uptime，每 cycle 一条事实。
+- **粗粒度位置**：复用现有 `LocationBridge`/`location.py` 的 last-known + 反向地理编码；
+  写入 Navigator 前由隐私层把经纬度四舍五入到约 1km。
+- 外部 JSON inbox（`navigator/inbox/`），供未来 Health Connect / 第三方采集器使用。
 
-未来 Kotlin 采集器只需把 JSON/JSONL 丢进 `navigator/inbox/`，例如：
+权限入口（Android 系统设置，不是运行时弹窗）：
+
+- 通知：设置 → 通知 → 设备与应用通知 → 允许 Jenny
+- 使用情况：设置 → 应用 → 特殊应用权限 → 使用情况访问 → 允许 Jenny
+
+未授予时对应采集静默跳过；其余功能不受影响。`/navigator` 会显示
+`Android access: notifications=on/off, usage=on/off`，可以直接确认状态。
+
+### 6.2 尚未实现：健康数据
+
+睡眠 / 步数 / 心率 / 运动需要 Health Connect（或设备专用传感器路径）和运行时
+授权流程；本版本没有接入。采集器就绪后只需把 JSON/JSONL 丢进
+`navigator/inbox/`，例如：
 
 ```json
 {"source":"android","kind":"notification","timestamp":"2026-10-26T22:00:00+08:00",
@@ -298,19 +318,23 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 {"source":"health","kind":"sleep","value":{"sleep_minutes":390}}
 ```
 
+### 6.3 隐私过滤
+
 隐私过滤在 `PerceptionManager._privacy_filter` 单点执行：
 
 - `capture_notifications` / `capture_app_usage` / `capture_health` / `capture_location` /
-  `capture_screen` 开关
+  `capture_screen` / `capture_system` 开关
 - 敏感应用默认（微信、QQ、支付宝、银行等）只保留包名/应用名/计数，不保留标题与正文
 - `blocked_packages` 里的应用在写入存储前就被丢弃，等同于按应用关闭
 - 健康数据只保留白名单字段（`sleep_minutes/steps/resting_hr/...`）
 - 位置只保留两位小数（≈1km）
-- 屏幕默认关闭，不持续存储
+- 屏幕内容默认关闭，不持续存储；`capture_system` 只保留亮屏/电量等状态，不读屏幕内容
 - 所有外部 payload 深度/长度/列表长度有界
 
-这些是接口就绪；Kotlin 侧的通知监听/使用统计/健康读取**尚未实现**，属于下一阶段
-（Phase 13 P0/P1），不阻塞本阶段闭环。
+通知的原始内容只存在于 app-private 的有界队列里，最多约 1MB/300 条，Python
+drain 后即删除。监听服务默认**不采集**；第一个启用的 Navigator cycle 会写入
+`capture_notifications=true` 才开通。关闭通知采集后，下一个 cycle 会停止监听并清空
+队列；要彻底停止则撤销系统“通知使用权”。
 
 ---
 
@@ -339,6 +363,7 @@ Phase 1 不要求所有健康数据接入。当前已启用：
   "capture_health": false,
   "capture_location": true,
   "capture_screen": false,
+  "capture_system": true,
   "redact_sensitive_content": true,
   "sensitive_packages": ["com.tencent.mm", "..."],
   "blocked_packages": [],
@@ -357,6 +382,9 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 在聊天里输入 `/navigator`：只读，不调用 LLM、不触发分析，显示最近一次 snapshot 的
 七个维度、待评估干预和 Navigator Self-Model。适合确认 Runtime 是否在正常工作，
 或看看它最近把什么当成了“事实”。
+
+`/navigator notifications` / `/navigator usage` 会打开 Android 对应的系统授权页，
+方便授予通知使用权 / 使用情况访问；授权后下一个 cycle 自动生效。
 
 ---
 
@@ -386,6 +414,7 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 
 - `test_models_store.py` — JSONL 往返、append-only 状态更新、规则版本
 - `test_perception.py` — turn 指标、去重、更正/退让事件、隐私过滤、inbox
+- `test_android_perception.py` — Kotlin JSON → observation、敏感应用脱敏、权限状态
 - `test_aggregator.py` — 7 维、事实时间范围、无分数、证据
 - `test_trigger.py` — A–H 关键分支、冷却/上限/安静时段/urgent
 - `test_permissions.py` — 低风险允许、act 需确认、高风险关键词
@@ -414,7 +443,7 @@ python -m pytest -q
 
 ## 10. 本阶段明确未做
 
-1. Kotlin 通知监听/UsageStats/Health Connect 采集器（接口已就绪）。
+1. Health Connect 采集器（睡眠 / 步数 / 心率 / 运动）；通知与 App 使用已接入，健康数据仍走 `navigator/inbox/`。
 2. WebUI 设置面板中的 Navigator 开关（当前用 `config.json` 或工作区文件编辑）。
 3. 自动修改核心规则（这是有意的：规则变更必须先与用户讨论并记录版本）。
 4. 真正的动作执行器（Phase 1 的权限层只允许“说”，`act` 永远需确认）。

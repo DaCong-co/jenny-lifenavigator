@@ -148,8 +148,10 @@ release. **None of them carries anything about you.** The update check is a plai
 `latest.json` published with the release: no identifier, no version, no headers of ours, no
 query string — a public file fetched and compared on the device. It is the only one that goes
 to a server this project controls, and the only one you did not switch on: it runs every 24h,
-and `updates.enabled: false` stops it. Jenny declares 15 permissions and asks for **no**
+and `updates.enabled: false` stops it. Jenny declares 16 permissions and asks for **no**
 camera, microphone, contacts, SMS, call log, background location or storage.
+Two of them are special access grants the Life Navigator can use — notification access and
+usage access — and both are optional: without them the Navigator simply has less to observe.
 → [Every connection and permission](https://jenny.flagdizero.com/docs/reference/android-permissions/)
 
 Two disclosures I would rather you hear from me than discover:

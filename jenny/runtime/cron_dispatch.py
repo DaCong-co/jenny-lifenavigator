@@ -443,6 +443,10 @@ class CronDispatcher:
         navigator_cfg = cfg.agents.defaults.navigator
         if not navigator_cfg.enabled:
             logger.debug("Navigator: disabled")
+            # Also stop the native notification listener at runtime, not only at
+            # the next gateway start: an already-registered job keeps ticking.
+            from jenny.navigator.android_perception import configure_android_perception
+            await configure_android_perception(navigator_cfg)
             return None
         runtime = NavigatorRuntime(
             agent,
@@ -450,6 +454,7 @@ class CronDispatcher:
             workspace=cfg.workspace_path,
             deliver=self._navigator_deliver,
             timezone_name=cfg.agents.defaults.timezone,
+            location_config=cfg.tools.location,
         )
         result = await runtime.run_cycle()
         if result.error:

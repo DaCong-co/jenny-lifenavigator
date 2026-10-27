@@ -40,7 +40,9 @@ _HEALTH_SLEEP = "sleep"
 _HEALTH_STEPS = "steps"
 _HEALTH_HEART = "heart_rate"
 _HEALTH_WORKOUT = frozenset({"activity", "workout"})
-_ENVIRONMENT_KINDS = frozenset({"weather", "calendar", "environment", "location"})
+_ENVIRONMENT_KINDS = frozenset({
+    "weather", "calendar", "environment", "location", "power", "network",
+})
 
 _DECISION_LIKE_LIFE_EVENTS = frozenset({"decision", "goal_change", "milestone", "setback"})
 _GOAL_LIKE_LIFE_EVENTS = frozenset({"goal_change", "milestone", "setback"})
@@ -480,12 +482,41 @@ class StateAggregator:
             )
         if notifications:
             facts.append(f"{label}: {len(notifications)} notification record(s)")
+            sources = Counter(
+                str(o.value.get("package", ""))
+                for o in notifications if o.value.get("package")
+            )
+            if sources:
+                facts.append(
+                    f"{label}: notification sources: "
+                    + ", ".join(f"{name} {count}" for name, count in sources.most_common(3))
+                )
         change = CHANGE_UNKNOWN
+        current_app_minutes = self._app_minutes(context.observations)
+        prior_app_minutes = self._app_minutes(context.prior_observations)
         if current.messages >= 3 and prior.messages >= 3:
             ratio = current.messages / prior.messages
             change = CHANGE_CHANGED if ratio >= 1.6 or ratio <= 0.6 else CHANGE_STABLE
+        if current_app_minutes >= 30.0 and prior_app_minutes >= 30.0:
+            app_ratio = current_app_minutes / prior_app_minutes
+            if app_ratio >= 1.6 or app_ratio <= 0.6:
+                change = CHANGE_CHANGED
         messages = [o for o in context.observations if o.kind == _USER_MESSAGE]
-        return _Facts(facts=facts, evidence=[o.id for o in messages[-6:]], change=change)
+        evidence = [o.id for o in messages[-6:]]
+        evidence.extend(o.id for o in app_usage[-3:])
+        evidence.extend(o.id for o in notifications[-3:])
+        return _Facts(facts=facts, evidence=evidence, change=change)
+
+    @staticmethod
+    def _app_minutes(observations: Iterable[Observation]) -> float:
+        total = 0.0
+        for observation in observations:
+            if observation.kind not in ("app_usage", "screen"):
+                continue
+            value = _numeric(observation.value.get("minutes"))
+            if value is not None and value > 0:
+                total += value
+        return total
 
     def _cognitive_state(
         self, context: AggregationContext, messages: list[Observation], label: str,
@@ -547,6 +578,17 @@ class StateAggregator:
         places.discard("")
         if places:
             facts.append(f"{label}: coarse location(s): {', '.join(sorted(places)[:5])}")
+        power = [o for o in relevant if o.kind == "power"]
+        if power:
+            last = power[-1].value
+            battery = last.get("battery_percent")
+            facts.append(
+                f"{label}: device battery {battery if battery is not None else '?'}%, "
+                f"charging={bool(last.get('charging'))}, "
+                f"screen_on={bool(last.get('screen_on'))}, "
+                f"power_save={bool(last.get('power_save'))}, "
+                f"network={last.get('network') or '?'}"
+            )
         if events:
             facts.append(f"{label}: {len(events)} environment_change event(s)")
             evidence.extend(event.id for event in events[:5])

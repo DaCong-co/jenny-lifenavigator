@@ -638,6 +638,17 @@ class GatewayContainer:
                 # migrazione in memoria è già applicata, si riproverà al
                 # prossimo boot.
                 logger.opt(exception=True).warning("Could not persist config schema version")
+            # Apply the Navigator's notification-capture switch now, not only on
+            # the first cycle: with the whole runtime disabled no cycle runs, and
+            # the listener must not keep the last enabled state from a previous
+            # gateway run. No-op off Android.
+            try:
+                from jenny.navigator.android_perception import configure_android_perception
+                await configure_android_perception(self.config.agents.defaults.navigator)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Could not configure Navigator Android perception"
+                )
             # Wakelock di servizio (solo con power.keepAwake = "always"): va
             # chiesto qui, a config caricato e prima che cron/heartbeat comincino
             # a contare sui propri timer. Fuori da Android è un no-op silenzioso.

@@ -20,7 +20,7 @@ from jenny.navigator.models import (
 from jenny.navigator.store import NavigatorStore
 
 
-def _ctx(workspace):
+def _ctx(workspace, args=""):
     return CommandContext(
         msg=InboundMessage(
             channel="websocket", sender_id="user", chat_id="default",
@@ -29,7 +29,7 @@ def _ctx(workspace):
         session=None,
         key="unified:default",
         raw="/navigator",
-        args="",
+        args=args,
         loop=SimpleNamespace(workspace=workspace),
     )
 
@@ -38,6 +38,24 @@ def test_the_command_is_listed_with_a_tabler_icon():
     spec = {item.command: item for item in BUILTIN_COMMAND_SPECS}["/navigator"]
     assert spec.icon == "radar"
     assert spec.scope == "any"
+
+
+@pytest.mark.asyncio
+async def test_the_access_argument_opens_the_system_screen(tmp_path, monkeypatch):
+    from jenny.navigator import android_perception as ap
+
+    opened = []
+
+    async def _open(kind):
+        opened.append(kind)
+        return True
+
+    monkeypatch.setattr(ap, "open_android_access_settings", _open)
+
+    out = await cmd_navigator(_ctx(tmp_path, "notifications"))
+
+    assert opened == ["notifications"]
+    assert "Opened Android's notifications access screen" in out.content
 
 
 @pytest.mark.asyncio

@@ -355,6 +355,7 @@ class NavigatorConfig(Base):
     capture_health: bool = False
     capture_location: bool = True
     capture_screen: bool = False
+    capture_system: bool = True
     redact_sensitive_content: bool = True
     # Packages the user wants completely excluded, independent of the sensitive
     # list above. Sensitive packages are redacted; blocked ones are dropped.

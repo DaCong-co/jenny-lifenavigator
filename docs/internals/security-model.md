@@ -17,6 +17,8 @@ Concretely, this means the agent:
 
 Location and notifications *are* requested at runtime (`ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION`, `POST_NOTIFICATIONS`), but both are optional, user-facing toggles — see [Location](../using/location.md).
 
+The Life Navigator adds two optional **special access** gates that are not runtime dialogs: notification access (the `.JennyNotificationListener` service) and usage access (`PACKAGE_USAGE_STATS`). Both are granted in Android's own settings, both can be revoked at any time, and without them the Navigator simply has no notification/app-usage signal — Jenny keeps working. The listener defaults to not storing anything until a Navigator cycle enables capture; the raw queue is bounded in app-private cache and drained each cycle.
+
 Everything below this line is Jenny's own code running *inside* that sandbox. None of it can widen the sandbox; it can only narrow what the agent is allowed to do within it.
 
 ### Level 2 — Workspace policy (fail-closed)

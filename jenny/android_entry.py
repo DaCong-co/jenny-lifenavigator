@@ -97,6 +97,7 @@ def run_gateway(
         from jenny.agent.tools.ssh_jobs import reset_job_store
         from jenny.agent.tools.ssh_transport import reset_ssh_backend
         from jenny.config.store import reset_config_store_state
+        from jenny.navigator.android_perception import reset_android_perception_state
         from jenny.runtime.location import reset_location_state
         from jenny.runtime.notifier import reset_notifier_state
         from jenny.runtime.power import reset_power_state
@@ -109,6 +110,7 @@ def run_gateway(
         reset_installed_apps_state()
         reset_notifier_state()
         reset_location_state()
+        reset_android_perception_state()
         # L'updater tiene una fase *sticky* e un ``UpdateBridge`` in cache: senza
         # questo reset un gateway che riparte nello stesso processo mostrerebbe
         # la fase del run precedente (e rifiuterebbe di installare, credendo di

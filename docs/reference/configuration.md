@@ -132,6 +132,7 @@ data model and privacy gates are in
 | `agents.defaults.navigator.captureHealth` | bool | `false` | Accept sleep/steps/heart-rate observations (whitelisted fields only). Off by default: minimal necessary collection. |
 | `agents.defaults.navigator.captureLocation` | bool | `true` | Accept coarse location (rounded to ~1 km). |
 | `agents.defaults.navigator.captureScreen` | bool | `false` | Screen observations. Off by default, and never a continuous background source. |
+| `agents.defaults.navigator.captureSystem` | bool | `true` | Battery, charging, screen-on, power-save, network type and uptime, as one factual device-state observation per cycle. |
 | `agents.defaults.navigator.redactSensitiveContent` | bool | `true` | For sensitive packages (WeChat, QQ, banks, payment), keep package/app/count only — never title or body. |
 | `agents.defaults.navigator.sensitivePackages` | string[] | WeChat/QQ/Alipay/banks | Package prefixes treated as sensitive. |
 | `agents.defaults.navigator.blockedPackages` | string[] | `[]` | Package prefixes dropped entirely before storage, independent of the sensitive list (per-app switch). |

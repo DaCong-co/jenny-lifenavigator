@@ -61,7 +61,7 @@ _HEALTH_FIELDS = (
 _EXTERNAL_KINDS = frozenset({
     "notification", "app_usage", "screen", "location", "weather", "calendar",
     "sleep", "steps", "heart_rate", "activity", "workout", "battery", "power",
-    "health", "environment", "other",
+    "network", "health", "environment", "other",
 })
 
 _SCREEN_KINDS = frozenset({"screen"})
@@ -472,10 +472,26 @@ class PerceptionManager:
                 value.pop(key, None)
 
         sensitive = bool(package) and self._is_sensitive(package)
-        if sensitive and self.privacy.redact_sensitive_content:
-            if kind in _NOTIFICATION_KINDS:
+        if kind in _NOTIFICATION_KINDS:
+            # The Navigator uses notification *activity* (source, count, time),
+            # never the text. Dropping it for every package keeps the workspace
+            # store free of message content even when the raw app-private queue
+            # briefly had it.
+            value = {
+                "package": package,
+                "app": value.get("app", ""),
+                "category": value.get("category", ""),
+                "ongoing": bool(value.get("ongoing", False)),
+            }
+            if sensitive and self.privacy.redact_sensitive_content:
                 value = {"package": package, "app": value.get("app", "")}
-            elif kind in _APP_USAGE_KINDS:
+                metadata = {
+                    **metadata,
+                    "redacted": True,
+                    "sensitive_package": _package_label(package),
+                }
+        elif sensitive and self.privacy.redact_sensitive_content:
+            if kind in _APP_USAGE_KINDS:
                 allowed = {"package": package, "app": value.get("app", ""),
                            "minutes": value.get("minutes"), "count": value.get("count")}
                 value = {key: item for key, item in allowed.items() if item not in (None, "")}

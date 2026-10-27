@@ -49,10 +49,24 @@ Until this is tightened, if you care about your API keys not potentially ending 
 
 It's worth stating this relationship plainly, because it's easy to underestimate: **any file placed inside the workspace is readable by the agent, and anything the agent reads can end up in the context sent to your LLM provider.** There's no separate "private files" area inside the workspace — the workspace boundary (see [Security model](./security-model.md)) controls what the agent can reach on disk, not what it's willing to send upstream once it has read something. If you drop a sensitive document into `workspace/`, expect that its content can travel to whichever provider you've configured, the moment the agent has a reason to read it.
 
+## Life Navigator perception
+
+The Life Navigator adds local perception sources; they do **not** add a new data recipient. When the Navigator runs its hourly cycle, the aggregated state (facts, counts, time ranges and evidence ids) can go to the same configured LLM provider as a normal turn.
+
+- **Conversation** is observed as local metrics and a bounded text excerpt: message length, short/acknowledgement flags, corrections, time of day.
+- **Notifications** are captured only after you grant "notification access"; the raw queue is app-private and bounded (~1 MB/300 entries), drained on each cycle, and never sent verbatim to the provider. The Navigator store keeps only package/app/category/ongoing — never the title or body, for any app. Sensitive packages are reduced to package/app/count.
+- **App usage** is foreground minutes per package for the cycle window; it needs the "Usage access" special permission, and sensitive packages are reduced the same way.
+- **System status** is battery, charging, screen-on, power-save, network type and uptime — no identifiers and no screen content.
+- **Coarse location** reuses the existing location feature and is rounded to roughly 1 km before it reaches the Navigator store.
+- **Health data** (sleep/steps/heart rate) is not collected by this version. If a future Health Connect collector writes to `workspace/navigator/inbox/`, the same privacy filter and whitelist apply.
+
+Everything the Navigator stores lives under `workspace/navigator/`; the raw notification queue is under app-private `cache/perception/`, not the workspace and normally outside Android auto-backup. `agents.defaults.navigator.enabled: false` stops the cycle, and turning off `capture_notifications` both clears the queue and stops the listener from storing new ones; revoking Android's notification access is the hard stop.
+
 ## How to shrink the surface
 
 None of the five recipients above are mandatory except your LLM provider (Jenny can't function without one). To reduce what leaves the device:
 
+- **Turn off the Life Navigator**, or individual `capture_*` switches, if you don't want app/notification/system perception on the hourly cycle. `/navigator` shows what it currently holds; `agents.defaults.navigator.enabled: false` stops it.
 - **Turn off location sharing** in Settings if you don't want your last-known location included in every turn sent to the provider.
 - **Leave SSH off** unless you actually want Jenny reaching a server — it is off by default, and every registered host is a machine that receives commands and can receive workspace files.
 - **Don't enable Telegram** unless you actually want a second channel — it's off by default, and enabling it means your conversation also flows through Telegram's servers.
