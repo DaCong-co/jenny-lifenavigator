@@ -140,7 +140,9 @@ data model and privacy gates are in
 These are not yet in the Settings UI; edit `config.json` (or the workspace file
 editor). `enabled: false` stops the next tick immediately; turning it back on
 after a gateway started with it off needs a restart, because no settings handler
-re-arms this job yet. The other knobs are re-read on every cycle.
+re-arms this job yet. The other knobs are re-read on every cycle. `/navigator`
+in chat shows the current snapshot, pending interventions and the self-model
+without calling the model.
 
 ### Behavior and identity
 

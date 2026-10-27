@@ -352,6 +352,12 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 - `capture_health=false` 是默认值：健康数据最小必要采集，不因“能采”就全采。
 - 关闭 `enabled=false` 后 cron job 不再被注册；已注册的 job 在 dispatch 时也会退出。
 
+### 7.1 查看状态
+
+在聊天里输入 `/navigator`：只读，不调用 LLM、不触发分析，显示最近一次 snapshot 的
+七个维度、待评估干预和 Navigator Self-Model。适合确认 Runtime 是否在正常工作，
+或看看它最近把什么当成了“事实”。
+
 ---
 
 这两者职责不同：Navigator 是持续 Runtime（感知、触发、结构化判断、结果追踪），
@@ -393,6 +399,7 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 同时更新：
 
 - `tests/runtime/test_container_registers_configured_jobs.py`（新增 navigator job）
+- `tests/command/test_builtin_navigator.py`（`/navigator` 只读状态）
 - `tests/utils/test_asset_manifests.py`（新模板已在 manifest）
 
 运行：

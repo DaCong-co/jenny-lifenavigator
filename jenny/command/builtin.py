@@ -83,6 +83,57 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_navigator(ctx: CommandContext) -> OutboundMessage:
+    """Read-only view of the Navigator runtime: the state it currently holds."""
+    loop = ctx.loop
+    workspace = getattr(loop, "workspace", None)
+    if workspace is None:
+        content = "Navigator: no workspace available in this session."
+    else:
+        from jenny.navigator.models import DIMENSION_KEYS
+        from jenny.navigator.store import NavigatorStore
+
+        store = NavigatorStore(workspace)
+        snapshot = store.latest_snapshot()
+        state = store.read_trigger_state()
+        lines = ["🧭 Life Navigator"]
+        if state.get("last_llm_at"):
+            lines.append(f"Last analysis: {state['last_llm_at']}")
+        else:
+            lines.append("Last analysis: none yet")
+        if snapshot is None:
+            lines.append("")
+            lines.append(
+                "No local cycle has completed yet. It runs every "
+                "`agents.defaults.navigator.interval_min` minutes (default 60) "
+                "and usually calls no model at all."
+            )
+        else:
+            lines.append("")
+            lines.append(f"State window: {snapshot.window_start} .. {snapshot.window_end}")
+            for key in DIMENSION_KEYS:
+                dimension = snapshot.dimension(key)
+                facts = " · ".join(fact[:180] for fact in dimension.facts[:3])
+                lines.append(f"- {key} [{dimension.change}]: {facts or '(no facts)'}")
+            pending = store.pending_outcomes()
+            if pending:
+                lines.append("")
+                lines.append(f"Pending interventions: {len(pending)}")
+            notes = store.list_self_model_notes(limit=5)
+            if notes:
+                lines.append("")
+                lines.append("Navigator self-model:")
+                for note in notes:
+                    lines.append(f"- ({note.kind}) {note.statement[:220]}")
+        content = "\n".join(lines)
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
     # Import locale: ``jenny.agent.memory`` passa da ``jenny.agent.__init__``,
@@ -993,6 +1044,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/model ", cmd_model)
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
+    router.exact("/navigator", cmd_navigator)
+    router.prefix("/navigator ", cmd_navigator)
     router.exact("/goal", cmd_goal)
     router.prefix("/goal ", cmd_goal)
     router.exact("/dream", cmd_dream)

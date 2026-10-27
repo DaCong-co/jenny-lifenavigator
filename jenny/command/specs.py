@@ -111,6 +111,16 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "[n]",
     ),
     BuiltinCommandSpec(
+        "/navigator",
+        "Show Navigator state",
+        (
+            "Show what the Life Navigator currently observes: the seven state "
+            "dimensions, recent interventions and the Navigator's own self-model. "
+            "Read-only; the hourly cycle keeps running in the background."
+        ),
+        "radar",
+    ),
+    BuiltinCommandSpec(
         "/goal",
         "Start long-running goal",
         "Tell the agent to treat the request as a long-running goal.",
