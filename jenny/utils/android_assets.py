@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 _USER_OWNED_TEMPLATES = [
     "AGENTS.md", "SOUL.md", "USER.md", "HEARTBEAT.md",
     "memory/MEMORY.md",
+    # The Environment Model is the user's file: official facts, policy,
+    # first-hand results. The Navigator reads it and never writes it.
+    "navigator/environment.md",
 ]
 
 # Prompt di sistema. Non li scrive nessun utente: sono il codice sorgente del
@@ -44,6 +47,7 @@ _SYSTEM_PROMPT_TEMPLATES = [
     "agent/readonly.md", "agent/project_init.md", "agent/tidy.md",
     "agent/orchestrator.md", "agent/tool_inventory.md",
     "agent/life_model_section.md", "agent/life_model_update.md", "agent/life_review.md",
+    "agent/navigator_core.md", "agent/navigator_expression.md",
     "agent/_snippets/untrusted_content.md",
     "agent/types/researcher.md", "agent/types/writer.md", "agent/types/coder.md",
     "agent/types/analyst.md", "agent/types/sysadmin.md", "agent/types/operator.md",

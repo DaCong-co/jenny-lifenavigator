@@ -166,6 +166,18 @@ class GatewayContainer:
         agent = self._agent
         return getattr(agent, "record_channel_delivery", None) if agent is not None else None
 
+    async def _navigator_deliver_message(self, message: Any) -> None:
+        """Consegna l'unico messaggio proattivo che il Navigator può produrre.
+
+        ``record=True`` perché la riga deve entrare nella storia (il turno dopo
+        l'utente trova ciò che Jenny gli ha appena detto); ``proactive=True``
+        perché è un turno a sé e deve aprire/chiudere la bolla WebUI, con il
+        fan-out verso il canale Telegram accoppiato se c'è.
+        """
+        if self._deliver_to_channel is None:
+            return
+        await self._deliver_to_channel(message, record=True, proactive=True)
+
     async def _snapshot_before_dream(self) -> bool:
         """Checkpoint del workspace prima che Dream riscriva la memoria.
 
@@ -422,6 +434,7 @@ class GatewayContainer:
             cron=self.cron,
             heartbeat_cfg=hb_cfg,
             snapshot_before_dream=self._snapshot_before_dream,
+            navigator_deliver=self._navigator_deliver_message,
         ).dispatch
 
         # I lavoratori periodici che questa versione **non esegue piu'**. Il loro
@@ -476,6 +489,21 @@ class GatewayContainer:
         else:
             logger.info("Life review: disabled")
 
+        # Register the Navigator runtime job. Unlike Dream, this one is not a
+        # workspace maintenance pass: it is the cognitive loop, so it is on by
+        # default. Its trigger keeps most cycles LLM-free.
+        navigator_cfg = config.agents.defaults.navigator
+        if navigator_cfg.enabled:
+            self.cron.register_system_job(CronJob(
+                id="navigator",
+                name="navigator",
+                schedule=navigator_cfg.build_schedule(),
+                payload=CronPayload(kind="system_event"),
+            ))
+            logger.info("Navigator: {}", navigator_cfg.describe_schedule())
+        else:
+            logger.info("Navigator: disabled")
+
         # Register Heartbeat system job (idempotent on restart).
         if hb_cfg.enabled:
             self.cron.register_system_job(CronJob(
@@ -527,8 +555,16 @@ class GatewayContainer:
         from jenny.agent.loop import AgentLoop
         from jenny.agent.token_usage import TokenUsageHook
         from jenny.agent.tools.message import MessageTool
+        from jenny.config.loader import load_config
+        from jenny.navigator.hook import NavigatorPerceptionHook
+        from jenny.navigator.runtime import NavigatorTurnObserver
         from jenny.session.webui_turns import WebuiTurnCoordinator
 
+        navigator_observer = NavigatorTurnObserver(
+            config.workspace_path,
+            timezone_name=config.agents.defaults.timezone,
+            config_provider=lambda: load_config().agents.defaults.navigator,
+        )
         agent = AgentLoop.from_config(
             config, self.bus,
             provider=provider,
@@ -536,7 +572,10 @@ class GatewayContainer:
             session_manager=self.session_manager,
             runtime_events=self.runtime_events,
             ui_query=self.ui_query,
-            hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+            hooks=[
+                TokenUsageHook(timezone_name=config.agents.defaults.timezone),
+                NavigatorPerceptionHook(navigator_observer),
+            ],
         )
         WebuiTurnCoordinator(
             bus=self.bus,

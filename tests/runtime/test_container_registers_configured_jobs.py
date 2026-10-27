@@ -1,6 +1,6 @@
 """Il composition root registra i lavori periodici che la config chiede.
 
-La proprietà è una sola, e vale per tutti e quattro i job condizionali:
+La proprietà è una sola, e vale per tutti e cinque i job condizionali:
 **se la config lo accende, ``GatewayContainer.build()`` lo registra nel cron con
 l'orario configurato; se la spegne, non lo registra.**
 
@@ -78,6 +78,13 @@ _CONDITIONAL_JOBS = [
         id="gardener",
     ),
     pytest.param(
+        "navigator",
+        lambda c, on: setattr(c.agents.defaults.navigator, "enabled", on),
+        lambda c: setattr(c.agents.defaults.navigator, "interval_min", 23),
+        23 * _MINUTE_MS,
+        id="navigator",
+    ),
+    pytest.param(
         "heartbeat",
         lambda c, on: setattr(c.gateway.heartbeat, "enabled", on),
         lambda c: setattr(c.gateway.heartbeat, "interval_s", 111),
@@ -130,7 +137,7 @@ def test_a_disabled_job_is_not_registered(
     assert others <= set(jobs), f"spegnere {job_id} ha portato via anche {others - set(jobs)}"
 
 
-def test_by_default_all_four_periodic_jobs_are_registered(workspace: Path) -> None:
+def test_by_default_all_five_periodic_jobs_are_registered(workspace: Path) -> None:
     """I default di produzione, non solo i valori iniettati.
 
     Il container non è l'unico modo di spegnere un lavoro: se un domani un

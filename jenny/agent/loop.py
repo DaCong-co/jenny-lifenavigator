@@ -692,7 +692,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         """
         scope = self.workspace_scopes.for_message(msg, session.metadata)
         chat_id = self._runtime_chat_id(msg)
-        turn_tools = tools or self.tools
+        turn_tools = tools if tools is not None else self.tools
         return self.context.build_messages(
             available_tools=turn_tools.tool_names,
             # Un registry sostituito non e l'orchestratore: e un altro agente
@@ -1485,8 +1485,10 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
                 initial_messages=initial_messages,
                 # ``tools`` arriva gia risolto da ``_process_message``; il
                 # fallback resta per i chiamanti diretti (test) che entrano qui
-                # senza passare dalla FSM.
-                tools=tools or self.tools,
+                # senza passare dalla FSM. ``is None`` e non ``or``: un
+                # ``ToolRegistry`` vuoto e un registry valido (Navigator Core),
+                # e con ``or`` sarebbe scivolato sul registry completo del loop.
+                tools=tools if tools is not None else self.tools,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
@@ -2168,7 +2170,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             # risoluzione stava solo davanti al runner, chi costruiva il prompt
             # rispondeva da solo alla stessa domanda, e con un registry
             # sostituito (Dream, il giardiniere) rispondeva diverso.
-            tools=tools or self.tools,
+            tools=tools if tools is not None else self.tools,
             turn_token=turn_token,
         )
 
@@ -2250,7 +2252,9 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         istanza**, e con un registry sostituito leggere l'istanza di default
         darebbe sempre la risposta sbagliata.
         """
-        return declared_marker_lines((tools or self.tools).get("nothing_to_report"))
+        return declared_marker_lines(
+            (tools if tools is not None else self.tools).get("nothing_to_report")
+        )
 
     def _message_tool_spoke(self, tools: ToolRegistry | None = None) -> bool:
         """Il tool ``message`` ha già consegnato verso il target d'origine in questo turno.
@@ -2266,7 +2270,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         registry sostituito (l'idioma di Dream e del giardiniere) leggere l'istanza di default
         darebbe sempre ``False``. Chi ha il registry del turno lo passa.
         """
-        mt = (tools or self.tools).get("message")
+        mt = (tools if tools is not None else self.tools).get("message")
         return isinstance(mt, MessageTool) and mt._sent_in_turn
 
     def _assemble_outbound(

@@ -254,10 +254,10 @@ def _alert_gardener_stuck(name: str, failures: int, status: str) -> None:
 
 GARDENER_JOB_ID = "gardener"
 
-# I due lavoratori periodici, col nome del loro job e il campo di config che li
+# I lavoratori periodici, col nome del loro job e il campo di config che li
 # tara. Elenco chiuso e non un getattr sul nome: chi aggiunge un lavoratore lo
 # registra qui, e chi legge vede in due righe quali sono.
-_SYSTEM_WORKERS: tuple[str, ...] = ("dream", "gardener", "life_review")
+_SYSTEM_WORKERS: tuple[str, ...] = ("dream", "gardener", "life_review", "navigator")
 
 
 def refresh_system_job(
@@ -327,6 +327,11 @@ class CronDispatcher:
         # callback che con gli snapshot spenti non fa nulla e tace verrebbe
         # letto come uno che ha fatto il suo lavoro.
         snapshot_before_dream: Callable[[], Awaitable[bool]] | None = None,
+        # Delivery callback used by the Navigator runtime for its one possible
+        # proactive message. The message tool is not used: the Navigator has no
+        # tools by design, and the deliverer already knows how to record the
+        # message in the session and mirror it to the paired channel.
+        navigator_deliver: Callable[[Any], Awaitable[None]] | None = None,
         # L'orologio, iniettabile per una ragione sola: da quando l'heartbeat
         # confronta due istanti — quello dell'avviso e quello dell'ultimo
         # messaggio dell'utente — un test che non può muoverlo non può provare
@@ -338,6 +343,7 @@ class CronDispatcher:
         self._cron = cron
         self._hb_cfg = heartbeat_cfg
         self._snapshot_before_dream = snapshot_before_dream
+        self._navigator_deliver = navigator_deliver
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         # Un task delegato con ``spawn`` non ha un esito dentro il turno che lo
         # delega, e il turno che quell'esito ce l'ha — l'annuncio del subagent —
@@ -393,6 +399,8 @@ class CronDispatcher:
             return await self._run_heartbeat(agent, job)
         if job.name == "life_review":
             return await self._run_life_review(agent)
+        if job.name == "navigator":
+            return await self._run_navigator(agent)
         if job.name == "update_check":
             return await self._run_update_check(agent)
         if is_bound_cron_job(job):
@@ -418,6 +426,36 @@ class CronDispatcher:
             logger.debug("Life review: disabled")
             return None
         await run_life_review(agent, agent.context.life_model)
+        return None
+
+    async def _run_navigator(self, agent: "CronCapableAgent") -> str | None:
+        """One cheap Navigator cycle: perceive, aggregate, maybe think.
+
+        The cycle is the *only* place that calls the LLM for proactive
+        cognition, and it usually does not: the trigger returns ``no_trigger``
+        on an ordinary day. The runtime owns its own throttle state, so the
+        cron interval is just the sampling rate of the local loop.
+        """
+        from jenny.config.loader import load_config
+        from jenny.navigator.runtime import NavigatorRuntime
+
+        cfg = load_config()
+        navigator_cfg = cfg.agents.defaults.navigator
+        if not navigator_cfg.enabled:
+            logger.debug("Navigator: disabled")
+            return None
+        runtime = NavigatorRuntime(
+            agent,
+            navigator_cfg,
+            workspace=cfg.workspace_path,
+            deliver=self._navigator_deliver,
+            timezone_name=cfg.agents.defaults.timezone,
+        )
+        result = await runtime.run_cycle()
+        if result.error:
+            logger.warning("Navigator cycle: {}", result.summary)
+        else:
+            logger.debug("Navigator cycle: {}", result.summary)
         return None
 
     async def _run_gardener(self, agent: "CronCapableAgent") -> str | None:

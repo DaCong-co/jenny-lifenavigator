@@ -431,7 +431,9 @@ class AgentRunner(RequestExecutionMixin, ToolExecutionMixin):
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
-        context = AgentRunHookContext(messages=deepcopy(messages))
+        context = AgentRunHookContext(
+            messages=deepcopy(messages), session_key=spec.session_key,
+        )
 
         try:
             await hook.before_run(context)

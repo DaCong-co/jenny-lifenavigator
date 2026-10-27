@@ -105,6 +105,43 @@ What applies when: `enabled` and the intervals re-arm the periodic job immediate
 
 A number outside its range in a file written by an older version is **clamped to the bound** rather than rejected — a stricter schema would fail to parse the file, and the recovery path for an unparseable `config.json` starts from defaults, taking your provider and API key with it. That clemency is also what lets a worker be switched off from such a file. See [The gardener](../using/gardener.md).
 
+### Life Navigator runtime
+
+The Navigator is the cognitive runtime on top of the agent (perception → state
+aggregation → trigger → structured analysis → permission → outcome). It owns
+`<workspace>/navigator/` and never writes `life_model/`. The full behaviour,
+data model and privacy gates are in
+[Life Navigator Runtime](../internals/lifenavigator-runtime.md).
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `agents.defaults.navigator.enabled` | bool | `true` | Registers the hourly Navigator job. This only runs the cheap local cycle; the trigger decides whether any LLM call happens, and most cycles do not. Disabling takes effect on the next tick; re-enabling after a start with it off needs a gateway restart, because there is no Settings control to re-arm the job. |
+| `agents.defaults.navigator.intervalMin` | int ≥ 15 | `60` | Minutes between local cycles (the sampling rate of perception, not the LLM call rate). |
+| `agents.defaults.navigator.minMinutesBetweenAnalyses` | int ≥ 30 | `180` | Minimum gap between two Navigator analyses. |
+| `agents.defaults.navigator.maxAnalysesPerDay` | int ≥ 1 | `3` | Daily cap on analyses, except an `urgent` watched-topic event. |
+| `agents.defaults.navigator.quietStartHour` / `quietEndHour` | int 0–23 | `23` / `7` | Quiet hours: no proactive message. Analysis itself is also deferred (except `urgent`). |
+| `agents.defaults.navigator.observationWindowDays` | int 1–90 | `7` | Window the aggregator reads. |
+| `agents.defaults.navigator.outcomeWindowHours` | int 1–336 | `48` | How long an intervention is observed before its outcome is evaluated. |
+| `agents.defaults.navigator.driftMinDays` | int 1–14 | `2` | Distinct days with a moved dimension before the trigger calls it sustained drift. |
+| `agents.defaults.navigator.dismissalCooldownHours` | int 1–168 | `24` | After “I'm fine / back off”, stay quiet this long unless materially new evidence appears. |
+| `agents.defaults.navigator.watchTopics` | string[] | `[]` | Topics you explicitly asked to be alerted about. A mention plus a high-value event becomes `urgent`. |
+| `agents.defaults.navigator.captureConversation` | bool | `true` | Observe user/assistant turns locally (metrics, short/ack flags, corrections). |
+| `agents.defaults.navigator.captureConversationText` | bool | `true` | Keep a bounded text excerpt in the observation. Set `false` to keep only metrics. |
+| `agents.defaults.navigator.captureNotifications` | bool | `true` | Accept notification observations from `navigator/inbox/`. |
+| `agents.defaults.navigator.captureAppUsage` | bool | `true` | Accept app-usage observations. |
+| `agents.defaults.navigator.captureHealth` | bool | `false` | Accept sleep/steps/heart-rate observations (whitelisted fields only). Off by default: minimal necessary collection. |
+| `agents.defaults.navigator.captureLocation` | bool | `true` | Accept coarse location (rounded to ~1 km). |
+| `agents.defaults.navigator.captureScreen` | bool | `false` | Screen observations. Off by default, and never a continuous background source. |
+| `agents.defaults.navigator.redactSensitiveContent` | bool | `true` | For sensitive packages (WeChat, QQ, banks, payment), keep package/app/count only — never title or body. |
+| `agents.defaults.navigator.sensitivePackages` | string[] | WeChat/QQ/Alipay/banks | Package prefixes treated as sensitive. |
+| `agents.defaults.navigator.blockedPackages` | string[] | `[]` | Package prefixes dropped entirely before storage, independent of the sensitive list (per-app switch). |
+| `agents.defaults.navigator.deliveryChannel` / `deliveryChatId` | string | `"websocket"` / `"default"` | Where the one proactive message is delivered. The deliverer mirrors to the paired Telegram chat too. |
+
+These are not yet in the Settings UI; edit `config.json` (or the workspace file
+editor). `enabled: false` stops the next tick immediately; turning it back on
+after a gateway started with it off needs a restart, because no settings handler
+re-arms this job yet. The other knobs are re-read on every cycle.
+
 ### Behavior and identity
 
 | Key | Type | Default | Effect |

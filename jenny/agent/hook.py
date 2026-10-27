@@ -72,6 +72,11 @@ class AgentRunHookContext:
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
     exception: BaseException | None = None
+    # The session this run belongs to. Added for observational hooks (the
+    # Navigator perception hook): without it a run-level hook cannot tell the
+    # personal conversation from Dream or a subagent, and the ``AgentHookContext``
+    # that carries it is per-iteration, too narrow a lifetime for a per-run fact.
+    session_key: str | None = None
 
 
 class AgentHook:

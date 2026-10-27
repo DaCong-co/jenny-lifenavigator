@@ -315,6 +315,73 @@ class LifeReviewConfig(Base):
         return f"every {self.interval_h}h"
 
 
+class NavigatorConfig(Base):
+    """Life Navigator runtime: perception, trigger, core, outcomes.
+
+    On by default because the runtime is the point of this fork, but its
+    trigger is conservative: most cycles produce ``no_trigger`` and cost no LLM
+    call. Proactive messages are still one short discussion at most, gated by
+    permissions, quiet hours, a cooldown and a daily cap.
+    """
+
+    _MINUTE_MS = 60_000
+
+    enabled: bool = True
+    # How often the cheap local cycle runs. This is *not* how often the LLM is
+    # called: the trigger and the cooldown below decide that.
+    interval_min: int = Field(default=60, ge=15)
+
+    # Analysis throttle.
+    min_minutes_between_analyses: int = Field(default=180, ge=30)
+    max_analyses_per_day: int = Field(default=3, ge=1)
+    quiet_start_hour: int = Field(default=23, ge=0, le=23)
+    quiet_end_hour: int = Field(default=7, ge=0, le=23)
+
+    # Windows.
+    observation_window_days: int = Field(default=7, ge=1, le=90)
+    outcome_window_hours: int = Field(default=48, ge=1, le=336)
+    drift_min_days: int = Field(default=2, ge=1, le=14)
+    dismissal_cooldown_hours: int = Field(default=24, ge=1, le=168)
+
+    # Topics the user explicitly asked to be alerted about. The trigger treats a
+    # recent mention plus a high-value event as urgent.
+    watch_topics: list[str] = Field(default_factory=list)
+
+    # Perception / privacy.
+    capture_conversation: bool = True
+    capture_conversation_text: bool = True
+    capture_notifications: bool = True
+    capture_app_usage: bool = True
+    capture_health: bool = False
+    capture_location: bool = True
+    capture_screen: bool = False
+    redact_sensitive_content: bool = True
+    # Packages the user wants completely excluded, independent of the sensitive
+    # list above. Sensitive packages are redacted; blocked ones are dropped.
+    blocked_packages: list[str] = Field(default_factory=list)
+    sensitive_packages: list[str] = Field(default_factory=lambda: [
+        "com.tencent.mm", "com.tencent.mobileqq", "com.tencent.tim",
+        "com.tencent.mtt",
+        "com.eg.android.AlipayGphone", "com.unionpay", "com.icbc",
+        "com.chinamworld.main", "com.bankcomm", "com.cmbchina",
+    ])
+
+    # Proactive delivery target. The WebUI chat is the default; the deliverer
+    # also mirrors to the paired Telegram chat.
+    delivery_channel: str = "websocket"
+    delivery_chat_id: str = "default"
+
+    def build_schedule(self) -> CronSchedule:
+        return CronSchedule(kind="every", every_ms=self.interval_min * self._MINUTE_MS)
+
+    def describe_schedule(self) -> str:
+        return (
+            f"every {self.interval_min}min, at most {self.max_analyses_per_day} "
+            f"analysis/day, quiet {self.quiet_start_hour:02d}:00-"
+            f"{self.quiet_end_hour:02d}:00"
+        )
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -413,6 +480,7 @@ class AgentDefaults(Base):
     dream: DreamConfig = Field(default_factory=DreamConfig)
     gardener: GardenerConfig = Field(default_factory=GardenerConfig)
     life_review: LifeReviewConfig = Field(default_factory=LifeReviewConfig)
+    navigator: NavigatorConfig = Field(default_factory=NavigatorConfig)
     model_preset: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelPreset", "model_preset"),

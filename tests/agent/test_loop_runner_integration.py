@@ -30,6 +30,25 @@ def _make_loop(tmp_path):
     return loop
 
 @pytest.mark.asyncio
+async def test_an_empty_tool_registry_is_not_replaced_by_the_loop_registry(tmp_path):
+    """A deliberately empty registry must stay empty.
+
+    ``ToolRegistry`` is falsy when it has no tools. The old ``tools or
+    self.tools`` fallback therefore handed the full main-agent registry to
+    callers that pass an empty one on purpose — the Navigator Core and the
+    Expression layer are exactly that caller, and neither may hold a tool.
+    """
+    from jenny.agent.tools.registry import ToolRegistry
+
+    loop = _make_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="json"))
+
+    await loop._run_agent_loop([], tools=ToolRegistry())
+
+    assert loop.provider.chat_with_retry.await_args.kwargs["tools"] == []
+
+
+@pytest.mark.asyncio
 async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
