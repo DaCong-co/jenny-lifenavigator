@@ -110,7 +110,7 @@ def _important(**kwargs):
 async def test_a_second_cycle_is_busy_while_one_is_running(tmp_path):
     from jenny.navigator import runtime as runtime_module
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, _store, core, _trigger, _expr = _runtime(
         tmp_path, trigger_decision=_important(),
     )
     runtime_module._CYCLE_MUTEX.acquire()
@@ -124,7 +124,7 @@ async def test_a_second_cycle_is_busy_while_one_is_running(tmp_path):
 
 
 async def test_no_trigger_costs_no_llm_call(tmp_path):
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, store, core, _trigger, expr = _runtime(
         tmp_path, trigger_decision=TriggerDecision(priority=TriggerPriority.NO_TRIGGER),
     )
     result = await runtime.run_cycle(now=NOW)
@@ -135,7 +135,7 @@ async def test_no_trigger_costs_no_llm_call(tmp_path):
 
 
 async def test_disabled_runtime_does_nothing(tmp_path):
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, _store, _core, trigger, _expr = _runtime(
         tmp_path, trigger_decision=_important(),
         config=NavigatorConfig(enabled=False),
     )
@@ -150,7 +150,7 @@ async def test_important_trigger_speaks_and_records_outcome(tmp_path):
     async def deliver(message):
         delivered.append(message)
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, store, core, _trigger, expr = _runtime(
         tmp_path, trigger_decision=_important(), deliver=deliver,
     )
     result = await runtime.run_cycle(now=NOW)
@@ -171,7 +171,7 @@ async def test_low_confidence_is_analysis_only(tmp_path):
     async def deliver(message):
         delivered.append(message)
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, store, _core, _trigger, _expr = _runtime(
         tmp_path, trigger_decision=_important(),
         decision=_decision(confidence="low"), deliver=deliver,
     )
@@ -188,7 +188,7 @@ async def test_high_risk_action_is_not_executed(tmp_path):
     async def deliver(message):
         delivered.append(message)
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, store, _core, _trigger, _expr = _runtime(
         tmp_path, trigger_decision=_important(),
         decision=_decision(kind="act"), deliver=deliver,
     )
@@ -206,7 +206,7 @@ async def test_speech_not_allowed_by_trigger_is_analysis_only(tmp_path):
     async def deliver(message):
         delivered.append(message)
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, _store, core, _trigger, expr = _runtime(
         tmp_path, trigger_decision=_important(allow_speak=False), deliver=deliver,
     )
     result = await runtime.run_cycle(now=NOW)
@@ -219,7 +219,7 @@ async def test_delivery_failure_does_not_create_an_outcome(tmp_path):
     async def deliver(message):
         raise RuntimeError("no channel")
 
-    runtime, store, core, trigger, expr = _runtime(
+    runtime, store, _core, _trigger, _expr = _runtime(
         tmp_path, trigger_decision=_important(), deliver=deliver,
     )
     result = await runtime.run_cycle(now=NOW)

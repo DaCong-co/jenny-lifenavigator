@@ -77,7 +77,7 @@ def test_dismissal_creates_a_backoff_event(tmp_path):
 
 
 def test_sensitive_notification_content_is_redacted(tmp_path):
-    store, perception = _manager(tmp_path, redact_sensitive_content=True)
+    _store, perception = _manager(tmp_path, redact_sensitive_content=True)
     observation = perception.ingest_record({
         "source": "android", "kind": "notification",
         "timestamp": NOW.isoformat(),
@@ -115,7 +115,7 @@ def test_disabled_sources_are_dropped(tmp_path):
 
 
 def test_health_whitelist_keeps_only_used_fields(tmp_path):
-    store, perception = _manager(tmp_path, capture_health=True)
+    _store, perception = _manager(tmp_path, capture_health=True)
     observation = perception.ingest_record({
         "source": "health", "kind": "sleep",
         "value": {"sleep_minutes": 390, "raw_sensor_blob": "x" * 4000},
@@ -125,7 +125,7 @@ def test_health_whitelist_keeps_only_used_fields(tmp_path):
 
 
 def test_location_is_coarsened(tmp_path):
-    store, perception = _manager(tmp_path)
+    _store, perception = _manager(tmp_path)
     observation = perception.ingest_record({
         "source": "android", "kind": "location",
         "value": {"latitude": 31.230416, "longitude": 121.473701, "accuracy": 5},

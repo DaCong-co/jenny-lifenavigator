@@ -280,6 +280,9 @@ class StateAggregator:
             )
         except OSError:
             age = None
+        if age is not None:
+            # A file written "in the future" is clock skew, not -14h of age.
+            age = max(0.0, age)
         return AggregationContext(
             now=end,
             window_start=start,

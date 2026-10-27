@@ -739,11 +739,13 @@ class RuleVersion:
             version = int(data.get("version", 0))
         except (TypeError, ValueError):
             version = 0
+        raw_old = data.get("old_rule")
+        raw_new = data.get("new_rule")
         return cls(
             version=max(0, version),
             effective_time=str(data.get("effective_time", "")),
-            old_rule=dict(data.get("old_rule") or {}),
-            new_rule=dict(data.get("new_rule") or {}),
+            old_rule=dict(raw_old) if isinstance(raw_old, dict) else {},
+            new_rule=dict(raw_new) if isinstance(raw_new, dict) else {},
             reason=str(data.get("reason", "")),
             evidence=_as_tuple(data.get("evidence")),
             discussion_result=str(data.get("discussion_result", "")),
