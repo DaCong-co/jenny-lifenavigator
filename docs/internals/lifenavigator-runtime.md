@@ -387,6 +387,7 @@ Phase 1 不要求所有健康数据接入。当前已启用：
 - `test_expression.py` — 去 fence/引号、模型自述过滤、长度上限
 - `test_outcome.py` — 无回复/敷衍/推回/更正/重复拒绝笔记
 - `test_runtime.py` — 无触发器不调用 LLM、权限先于说话、投递失败不记录结果
+- `test_full_cycle.py` — 真实 Core + Expression + 假 provider 的完整一轮
 - `test_hook.py` — 只观察用户 turn、忽略内部会话/合成行
 
 同时更新：
