@@ -35,7 +35,7 @@ class JennyNotificationListener : NotificationListenerService() {
             if (!NotificationStore.isCaptureEnabled(applicationContext)) return
             if (status.packageName == applicationContext.packageName) return
             val notification = status.notification ?: return
-            if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+            if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
             val extras = notification.extras
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)
@@ -60,7 +60,7 @@ class JennyNotificationListener : NotificationListenerService() {
                 .put("title", title.take(MAX_FIELD))
                 .put("text", (text.ifEmpty { ticker }).take(MAX_FIELD))
                 .put("category", notification.category ?: "")
-                .put("ongoing", notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
+                .put("ongoing", (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0)
             NotificationStore.append(applicationContext, item.toString())
         } catch (error: Exception) {
             // Never let a malformed notification kill the listener; Android
