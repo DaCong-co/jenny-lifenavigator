@@ -54,8 +54,8 @@ It's worth stating this relationship plainly, because it's easy to underestimate
 The Life Navigator adds local perception sources; they do **not** add a new data recipient. When the Navigator runs its hourly cycle, the aggregated state (facts, counts, time ranges and evidence ids) can go to the same configured LLM provider as a normal turn.
 
 - **Conversation** is observed as local metrics and a bounded text excerpt: message length, short/acknowledgement flags, corrections, time of day.
-- **Notifications** are captured only after you grant "notification access"; the raw queue is app-private and bounded (~1 MB/300 entries), drained on each cycle, and never sent verbatim to the provider. The Navigator store keeps only package/app/category/ongoing — never the title or body, for any app. Sensitive packages are reduced to package/app/count.
-- **App usage** is foreground minutes per package for the cycle window; it needs the "Usage access" special permission, and sensitive packages are reduced the same way.
+- **Notifications** are captured only after you grant "notification access"; the raw queue is app-private and bounded (~1 MB/300 entries), drained on each cycle, and never sent verbatim to the provider. The Navigator store keeps only package/app/category/ongoing — never the title or body, for any app. Sensitive packages are reduced to package/app; blocked packages are dropped entirely.
+- **App usage** is foreground minutes per package for the cycle window; it needs the "Usage access" special permission. Sensitive packages keep package/app/minutes/count; blocked packages are dropped.
 - **System status** is battery, charging, screen-on, power-save, network type and uptime — no identifiers and no screen content.
 - **Coarse location** reuses the existing location feature and is rounded to roughly 1 km before it reaches the Navigator store.
 - **Health data** (sleep/steps/heart rate) is not collected by this version. If a future Health Connect collector writes to `workspace/navigator/inbox/`, the same privacy filter and whitelist apply.

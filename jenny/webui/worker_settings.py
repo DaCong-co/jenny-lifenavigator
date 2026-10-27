@@ -1,14 +1,11 @@
-"""Le manopole dei due lavoratori periodici, per la schermata Impostazioni.
+"""Le manopole dei lavoratori periodici e del Life Navigator, per le Impostazioni.
 
-Dream e il giardiniere sono i due job di sistema registrati all'avvio
-(``runtime/container.py``). Le loro manopole vivono in ``config.json`` sotto
+Dream, il giardiniere e il Navigator sono i job di sistema registrati all'avvio
+(``runtime/container.py``). Le prime due sezioni vivono in ``config.json`` sotto
 ``agents.defaults.{dream,gardener}`` piu'
-``agents.defaults.compact_projects_when_idle``, e fino a questo modulo la loro
-copertura era a macchia di leopardo: Dream aveva i tetti dentro ``/dream
-budget``, il giardiniere tutto dentro ``/gardener settings``, e un terzo
-lavoratore, poi ritirato, niente: per spegnerlo si editava ``config.json`` a
-mano — che e' precisamente l'incidente da cui il blocco del giardiniere era
-nato (un ``sed -i`` che ha rotto l'etichetta SELinux del file).
+``agents.defaults.compact_projects_when_idle``; il Navigator sta in
+``agents.defaults.navigator`` ed e' l'unica di queste manopole che deve anche
+ri-armare il proprio job quando cambia ``enabled`` o ``interval_min``.
 
 Un comando e' un verbo: fa qualcosa adesso, in questa conversazione. Una
 manopola e' una preferenza che sopravvive al turno, e sta dove stanno le altre
@@ -28,8 +25,8 @@ Due cose che questo modulo deve fare e che sono facili da perdere:
   (:func:`_bounds`): un range scritto due volte diventa due range appena uno
   dei due si muove, ed e' proprio il numero che si racconta all'utente nel
   rifiuto.
-- **Le letture non sollevano mai.** Aprono quattro file dell'utente, e una
-  schermata Impostazioni che non si apre perche' ``SOUL.md`` e' illeggibile
+- **Le letture non sollevano mai.** Aprono i file dell'utente, e una schermata
+  Impostazioni che non si apre perche' ``SOUL.md`` e' illeggibile
   sarebbe un guasto peggiore di quello che sta segnalando — oltre a essere la
   schermata da cui si spengono i lavoratori.
 """
@@ -44,7 +41,7 @@ from loguru import logger
 from jenny.channels.http_utils import parse_flag
 from jenny.config import store
 from jenny.config.loader import load_config
-from jenny.config.schema import Config, DreamConfig, GardenerConfig
+from jenny.config.schema import Config, DreamConfig, GardenerConfig, NavigatorConfig
 from jenny.webui.settings_api import (
     WebUISettingsError,
     _apply_bool,
@@ -70,6 +67,16 @@ QueryParams = dict[str, list[str]]
 # review``, con una frase di conferma da ribattere; qui la conferma e' il flag
 # ``confirm_back_to_back``, che il client alza solo dopo un dialogo.
 REVIEW_CADENCE_FLOOR = 12
+
+# Le chiavi che, se presenti, chiedono un ri-armo del job Navigator. Presenza e
+# non cambio: ``register_system_job`` e' idempotente a intervallo identico, mentre
+# perdersi la transizione di ``enabled`` lascerebbe il file acceso e il job no.
+NAVIGATOR_REARM_KEYS = (
+    "navigator_enabled",
+    "navigatorEnabled",
+    "navigator_interval_min",
+    "navigatorIntervalMin",
+)
 
 
 
@@ -188,6 +195,264 @@ def worker_settings_payload(config: Config | None = None) -> dict[str, Any]:
         # ``update_worker_settings``.
         "compact_projects_when_idle": defaults.compact_projects_when_idle,
     }
+
+
+# ── Life Navigator ──────────────────────────────────────────────────────────
+
+
+def _navigator_status(config: Config | None = None) -> dict[str, Any] | None:
+    """Read-only snapshot for the settings panel; never raises into the page."""
+    try:
+        from jenny.navigator.models import DIMENSION_KEYS
+        from jenny.navigator.store import NavigatorStore
+
+        workspace = (config or load_config()).workspace_path
+        store = NavigatorStore(workspace)
+        snapshot = store.latest_snapshot()
+        state = store.read_trigger_state()
+        notes = store.list_self_model_notes(limit=5)
+        pending = store.pending_outcomes()
+        dimensions: list[dict[str, Any]] = []
+        if snapshot is not None:
+            for key in DIMENSION_KEYS:
+                dimension = snapshot.dimension(key)
+                dimensions.append({
+                    "key": key,
+                    "change": dimension.change,
+                    "facts": [fact[:220] for fact in dimension.facts[:3]],
+                })
+        return {
+            "last_analysis": state.get("last_llm_at"),
+            "last_priority": state.get("last_priority"),
+            "snapshot_at": snapshot.timestamp if snapshot else None,
+            "window": (
+                f"{snapshot.window_start} .. {snapshot.window_end}"
+                if snapshot else ""
+            ),
+            "dimensions": dimensions,
+            "pending": len(pending),
+            "self_model": [note.statement[:260] for note in notes],
+        }
+    except Exception:
+        logger.exception("could not read the Navigator status")
+        return None
+
+
+def navigator_settings_payload(config: Config | None = None) -> dict[str, Any] | None:
+    """The Navigator's knobs, plus a read-only state summary for the panel."""
+    try:
+        cfg = (config or load_config()).agents.defaults.navigator
+        return {
+            "enabled": cfg.enabled,
+            "schedule": cfg.describe_schedule(),
+            "interval_min": _number(NavigatorConfig, "interval_min", cfg.interval_min),
+            "min_minutes_between_analyses": _number(
+                NavigatorConfig,
+                "min_minutes_between_analyses",
+                cfg.min_minutes_between_analyses,
+            ),
+            "max_analyses_per_day": _number(
+                NavigatorConfig, "max_analyses_per_day", cfg.max_analyses_per_day,
+            ),
+            "quiet_start_hour": _number(
+                NavigatorConfig, "quiet_start_hour", cfg.quiet_start_hour,
+            ),
+            "quiet_end_hour": _number(
+                NavigatorConfig, "quiet_end_hour", cfg.quiet_end_hour,
+            ),
+            "observation_window_days": _number(
+                NavigatorConfig, "observation_window_days", cfg.observation_window_days,
+            ),
+            "outcome_window_hours": _number(
+                NavigatorConfig, "outcome_window_hours", cfg.outcome_window_hours,
+            ),
+            "drift_min_days": _number(
+                NavigatorConfig, "drift_min_days", cfg.drift_min_days,
+            ),
+            "dismissal_cooldown_hours": _number(
+                NavigatorConfig, "dismissal_cooldown_hours", cfg.dismissal_cooldown_hours,
+            ),
+            "watch_topics": list(cfg.watch_topics),
+            "capture_conversation": bool(cfg.capture_conversation),
+            "capture_conversation_text": bool(cfg.capture_conversation_text),
+            "capture_notifications": bool(cfg.capture_notifications),
+            "capture_app_usage": bool(cfg.capture_app_usage),
+            "capture_health": bool(cfg.capture_health),
+            "capture_location": bool(cfg.capture_location),
+            "capture_screen": bool(cfg.capture_screen),
+            "capture_system": bool(cfg.capture_system),
+            "redact_sensitive_content": bool(cfg.redact_sensitive_content),
+            "sensitive_packages": list(cfg.sensitive_packages),
+            "blocked_packages": list(cfg.blocked_packages),
+            "status": _navigator_status(config),
+        }
+    except Exception:
+        logger.exception("could not build the Navigator settings section")
+        return None
+
+
+def _parse_list(raw: str, *, limit: int = 100) -> list[str]:
+    import re
+
+    items: list[str] = []
+    for part in re.split(r"[\n,;|，；]+", raw or ""):
+        value = part.strip()
+        if value and value not in items:
+            items.append(value[:80])
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _apply_list(
+    query: QueryParams,
+    target: Any,
+    attr: str,
+    *names: str,
+) -> bool:
+    """Patch a string list; an explicit ``*_clear`` empties it.
+
+    An empty textarea cannot travel as a query value (``_postWithQuery`` drops
+    empty strings), so clearing needs a flag of its own rather than an empty
+    ``watch_topics=`` that the client would never send.
+    """
+    clear = any(
+        parse_flag(_first(query, f"{name}_clear", f"{name}Clear") or "")
+        for name in names
+    )
+    raw = _first(query, *names)
+    if raw is None and not clear:
+        return False
+    value = [] if clear else _parse_list(raw or "")
+    if list(getattr(target, attr)) == value:
+        return False
+    setattr(target, attr, value)
+    return True
+
+
+async def update_navigator_settings(query: QueryParams) -> dict[str, Any]:
+    """Write the Navigator's knobs through the config funnel."""
+
+    def _apply(config: Config) -> bool:
+        nav = config.agents.defaults.navigator
+        changed = _apply_bool(
+            query, nav, "enabled", "navigator_enabled", "navigatorEnabled",
+        )
+        for attr, snake, camel in (
+            ("interval_min", "navigator_interval_min", "navigatorIntervalMin"),
+            (
+                "min_minutes_between_analyses",
+                "navigator_min_minutes_between_analyses",
+                "navigatorMinMinutesBetweenAnalyses",
+            ),
+            (
+                "max_analyses_per_day",
+                "navigator_max_analyses_per_day",
+                "navigatorMaxAnalysesPerDay",
+            ),
+            ("quiet_start_hour", "navigator_quiet_start_hour", "navigatorQuietStartHour"),
+            ("quiet_end_hour", "navigator_quiet_end_hour", "navigatorQuietEndHour"),
+            (
+                "observation_window_days",
+                "navigator_observation_window_days",
+                "navigatorObservationWindowDays",
+            ),
+            (
+                "outcome_window_hours",
+                "navigator_outcome_window_hours",
+                "navigatorOutcomeWindowHours",
+            ),
+            ("drift_min_days", "navigator_drift_min_days", "navigatorDriftMinDays"),
+            (
+                "dismissal_cooldown_hours",
+                "navigator_dismissal_cooldown_hours",
+                "navigatorDismissalCooldownHours",
+            ),
+        ):
+            changed |= _apply_int(query, nav, attr, NavigatorConfig, snake, camel)
+
+        for attr, snake, camel in (
+            (
+                "capture_conversation",
+                "navigator_capture_conversation",
+                "navigatorCaptureConversation",
+            ),
+            (
+                "capture_conversation_text",
+                "navigator_capture_conversation_text",
+                "navigatorCaptureConversationText",
+            ),
+            (
+                "capture_notifications",
+                "navigator_capture_notifications",
+                "navigatorCaptureNotifications",
+            ),
+            (
+                "capture_app_usage",
+                "navigator_capture_app_usage",
+                "navigatorCaptureAppUsage",
+            ),
+            ("capture_health", "navigator_capture_health", "navigatorCaptureHealth"),
+            (
+                "capture_location",
+                "navigator_capture_location",
+                "navigatorCaptureLocation",
+            ),
+            ("capture_screen", "navigator_capture_screen", "navigatorCaptureScreen"),
+            ("capture_system", "navigator_capture_system", "navigatorCaptureSystem"),
+            (
+                "redact_sensitive_content",
+                "navigator_redact_sensitive_content",
+                "navigatorRedactSensitiveContent",
+            ),
+        ):
+            changed |= _apply_bool(query, nav, attr, snake, camel)
+
+        changed |= _apply_list(
+            query, nav, "watch_topics",
+            "navigator_watch_topics", "navigatorWatchTopics",
+        )
+        changed |= _apply_list(
+            query, nav, "sensitive_packages",
+            "navigator_sensitive_packages", "navigatorSensitivePackages",
+        )
+        changed |= _apply_list(
+            query, nav, "blocked_packages",
+            "navigator_blocked_packages", "navigatorBlockedPackages",
+        )
+        return changed
+
+    await store.mutate(_apply)
+    return settings_payload()
+
+
+async def navigator_access_payload() -> dict[str, Any]:
+    """Notification/usage access state for the panel; read-only."""
+    try:
+        from jenny.navigator.android_perception import android_access_status
+
+        return {"access": await android_access_status()}
+    except Exception:
+        logger.exception("could not read Android perception access")
+        return {"access": None}
+
+
+async def open_navigator_access(query: QueryParams) -> dict[str, Any]:
+    """Open one Android system access screen, then return the fresh state."""
+    from jenny.navigator.android_perception import (
+        android_access_status,
+        open_android_access_settings,
+    )
+
+    kind = (_first(query, "kind") or "usage").strip().lower()
+    if kind not in ("notifications", "usage"):
+        raise WebUISettingsError("kind must be 'notifications' or 'usage'")
+    opened = await open_android_access_settings(kind)
+    return {
+        "opened": bool(opened),
+        "access": await android_access_status(),
+    }
+
 
 
 # ── Scrittura ────────────────────────────────────────────────────────────────

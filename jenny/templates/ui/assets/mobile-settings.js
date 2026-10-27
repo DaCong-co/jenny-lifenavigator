@@ -187,6 +187,7 @@ export class SettingsController {
       this._section('tools', 'ti-tool', i18n.t('settings.tools'), this._renderTools(d)),
       this._section('memory', 'ti-sparkles', i18n.t('settings.memory.title'), this._renderMemory(d)),
       this._section('workers', 'ti-map', i18n.t('settings.workers.title'), this._renderWorkers(d)),
+      this._section('navigator', 'ti-radar', i18n.t('settings.navigator.title'), this._renderNavigator(d)),
       this._renderBatterySection(d),
       this._section('ssh', 'ti-terminal-2', i18n.t('settings.ssh.title'), this._renderSsh()),
       this._section('telegram', 'ti-brand-telegram', i18n.t('settings.telegram.title'), this._renderTelegram()),
@@ -872,6 +873,9 @@ export class SettingsController {
     // sulla strada verso "45".
     this.contentEl.querySelectorAll('[data-worker-key]').forEach(el => {
       const key = el.dataset.workerKey;
+      /* Navigator ha un cablaggio suo: stesso attributo per riusare
+         `_numberField`, ma endpoint e rollback diversi. */
+      if (key.startsWith('navigator_')) return;
       const family = key.startsWith('gardener_') || key.startsWith('compact_')
         ? 'workers' : 'memory';
       el.addEventListener('change', () => this._saveWorkerNumber(family, key, el));
@@ -966,6 +970,266 @@ export class SettingsController {
       }
       const measure = this.contentEl.querySelector(`[data-measure="${label}"]`);
       if (measure) measure.textContent = this._budgetMeasure(memory, label, key);
+    }
+  }
+
+  // ── Life Navigator ─────────────────────────────────────────────────
+
+  /* Un campo lista: textarea e non input perché gli argomenti e i package sono
+     un elenco, e una riga per voce è il modo in cui si legge davvero. */
+  _listField(label, key, values, hint, rows = 3) {
+    const text = (values || []).join('\n');
+    const labelHtml = label ? `<label class="settings-label">${label}</label>` : '';
+    return `<div class="settings-field">
+      ${labelHtml}
+      <textarea class="settings-input" data-navigator-list="${key}" rows="${rows}"
+        style="min-height:64px;resize:vertical">${escapeHtml(text)}</textarea>
+    </div>${hint ? this._hint(hint) : ''}`;
+  }
+
+  _renderNavigator(d) {
+    const n = d.navigator;
+    if (!n) {
+      return `<div class="settings-empty">${i18n.t('settings.navigator.unavailable')}</div>`;
+    }
+    const schedule = this._scheduleText(n.enabled, n.schedule);
+    return `
+      <p class="settings-hint" style="margin-top:0">${i18n.t('settings.navigator.intro')}</p>
+      ${this._toggleRow(i18n.t('settings.navigator.enable'), 'navigator-enabled-toggle', n.enabled)}
+      ${this._hint(schedule ? `<span id="navigator-schedule">${escapeHtml(i18n.t('settings.navigator.schedule', { schedule }))}</span>` : '<span id="navigator-schedule"></span>')}
+      ${this._hint(i18n.t('settings.navigator.enabledHint'))}
+      ${this._numberField(i18n.t('settings.navigator.interval'), 'navigator_interval_min', n.interval_min)}
+      ${this._numberField(i18n.t('settings.navigator.minBetween'), 'navigator_min_minutes_between_analyses', n.min_minutes_between_analyses)}
+      ${this._numberField(i18n.t('settings.navigator.maxPerDay'), 'navigator_max_analyses_per_day', n.max_analyses_per_day)}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.quiet')}</div>
+      ${this._numberField(i18n.t('settings.navigator.quietStart'), 'navigator_quiet_start_hour', n.quiet_start_hour)}
+      ${this._numberField(i18n.t('settings.navigator.quietEnd'), 'navigator_quiet_end_hour', n.quiet_end_hour)}
+      ${this._hint(i18n.t('settings.navigator.quietHint'))}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.windows')}</div>
+      ${this._numberField(i18n.t('settings.navigator.windowDays'), 'navigator_observation_window_days', n.observation_window_days)}
+      ${this._numberField(i18n.t('settings.navigator.outcomeHours'), 'navigator_outcome_window_hours', n.outcome_window_hours)}
+      ${this._numberField(i18n.t('settings.navigator.driftDays'), 'navigator_drift_min_days', n.drift_min_days)}
+      ${this._numberField(i18n.t('settings.navigator.dismissalHours'), 'navigator_dismissal_cooldown_hours', n.dismissal_cooldown_hours)}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.watchTopics')}</div>
+      ${this._listField('', 'navigator_watch_topics', n.watch_topics, i18n.t('settings.navigator.watchTopicsHint'), 3)}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.capture')}</div>
+      ${this._hint(i18n.t('settings.navigator.captureHint'))}
+      ${this._toggleRow(i18n.t('settings.navigator.captureConversation'), 'navigator-capture-conversation', n.capture_conversation)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureConversationText'), 'navigator-capture-conversation-text', n.capture_conversation_text)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureNotifications'), 'navigator-capture-notifications', n.capture_notifications)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureAppUsage'), 'navigator-capture-app-usage', n.capture_app_usage)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureHealth'), 'navigator-capture-health', n.capture_health)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureLocation'), 'navigator-capture-location', n.capture_location)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureScreen'), 'navigator-capture-screen', n.capture_screen)}
+      ${this._toggleRow(i18n.t('settings.navigator.captureSystem'), 'navigator-capture-system', n.capture_system)}
+      ${this._toggleRow(i18n.t('settings.navigator.redactSensitive'), 'navigator-redact-sensitive', n.redact_sensitive_content)}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.sensitive')}</div>
+      ${this._listField('', 'navigator_sensitive_packages', n.sensitive_packages, i18n.t('settings.navigator.packagesHint'), 3)}
+      <div class="settings-subheading">${i18n.t('settings.navigator.blocked')}</div>
+      ${this._listField('', 'navigator_blocked_packages', n.blocked_packages, '', 2)}
+
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.android')}</div>
+      <div id="navigator-access"><div class="settings-empty-state">${i18n.t('settings.loading')}</div></div>
+      <div class="settings-divider"></div>
+      <div class="settings-subheading">${i18n.t('settings.navigator.status')}</div>
+      <div id="navigator-status">${this._renderNavigatorStatus(n.status)}</div>`;
+  }
+
+  _renderNavigatorStatus(status) {
+    if (!status) {
+      return `<div class="settings-empty-state">${i18n.t('settings.navigator.statusEmpty')}</div>`;
+    }
+    const dimensions = (status.dimensions || []).map(dim => {
+      const key = String(dim.key || '');
+      const label = i18n.t(`settings.navigator.dims.${key}`);
+      const change = i18n.t(`settings.navigator.change${String(dim.change || 'unknown')
+        .replace(/^./, c => c.toUpperCase())}`);
+      const facts = (dim.facts || [])
+        .map(fact => `<div style="font-size:12px;color:var(--text-faint);margin-top:3px">${escapeHtml(fact)}</div>`)
+        .join('');
+      return `<div class="settings-field" style="padding-bottom:6px">
+        <div class="settings-label">${escapeHtml(label === `settings.navigator.dims.${key}` ? key.replace(/_/g, ' ') : label)}
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint)">${escapeHtml(change)}</span>
+        </div>${facts}</div>`;
+    }).join('');
+    const selfModel = (status.self_model || [])
+      .map(note => `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${escapeHtml(note)}</div>`)
+      .join('');
+    return `<div class="settings-hint" style="margin-top:0">
+      ${i18n.t('settings.navigator.lastAnalysis')}: ${escapeHtml(status.last_analysis || i18n.t('settings.navigator.never'))}<br>
+      ${i18n.t('settings.navigator.lastPriority')}: ${escapeHtml(status.last_priority || '—')}<br>
+      ${i18n.t('settings.navigator.pending')}: ${escapeHtml(String(status.pending ?? 0))}
+    </div>${dimensions}
+    <div class="settings-subheading" style="margin-top:8px">${i18n.t('settings.navigator.selfModel')}</div>
+    ${selfModel || this._hint(i18n.t('settings.navigator.noSelfModel'))}`;
+  }
+
+  _renderNavigatorAccess(access) {
+    if (access === null || access === undefined) {
+      return this._hint(i18n.t('settings.navigator.androidUnavailable'));
+    }
+    const row = (label, kind, granted) => `<div class="settings-field settings-toggle-row">
+      <label class="settings-label">${label}
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint)">${granted ? i18n.t('settings.navigator.accessOn') : i18n.t('settings.navigator.accessOff')}</span>
+      </label>
+      <button class="settings-btn-add" id="navigator-open-${kind}" type="button">
+        ${kind === 'notifications' ? i18n.t('settings.navigator.openNotifications') : i18n.t('settings.navigator.openUsage')}
+      </button>
+    </div>`;
+    return `${row(i18n.t('settings.navigator.notificationsAccess'), 'notifications', !!access.notifications)}
+      ${row(i18n.t('settings.navigator.usageAccess'), 'usage', !!access.usage)}
+      ${this._hint(i18n.t('settings.navigator.accessHint'))}`;
+  }
+
+  _wireNavigatorSettings() {
+    const toggles = [
+      ['navigator-enabled-toggle', 'navigator_enabled'],
+      ['navigator-capture-conversation', 'navigator_capture_conversation'],
+      ['navigator-capture-conversation-text', 'navigator_capture_conversation_text'],
+      ['navigator-capture-notifications', 'navigator_capture_notifications'],
+      ['navigator-capture-app-usage', 'navigator_capture_app_usage'],
+      ['navigator-capture-health', 'navigator_capture_health'],
+      ['navigator-capture-location', 'navigator_capture_location'],
+      ['navigator-capture-screen', 'navigator_capture_screen'],
+      ['navigator-capture-system', 'navigator_capture_system'],
+      ['navigator-redact-sensitive', 'navigator_redact_sensitive_content'],
+    ];
+    for (const [id, key] of toggles) {
+      const el = this.contentEl.querySelector(`#${id}`);
+      if (!el) continue;
+      el.addEventListener('change', async () => {
+        const on = el.checked;
+        try {
+          await this._saveNavigatorParams({ [key]: on ? '1' : '0' });
+        } catch (e) {
+          el.checked = !on;
+          showToast(e.message, 'error');
+        }
+      });
+    }
+
+    this.contentEl.querySelectorAll('[data-worker-key^="navigator_"]').forEach(el => {
+      el.addEventListener('change', () => this._saveNavigatorNumber(el.dataset.workerKey, el));
+    });
+
+    this.contentEl.querySelectorAll('[data-navigator-list]').forEach(el => {
+      el.addEventListener('change', () => this._saveNavigatorList(el.dataset.navigatorList, el));
+    });
+  }
+
+  async _saveNavigatorNumber(key, el) {
+    const attr = key.slice('navigator_'.length);
+    const previous = this.data?.navigator?.[attr]?.value;
+    const raw = el.value.trim();
+    if (raw === '') { el.value = previous ?? ''; return; }
+    const value = Number(raw);
+    if (!Number.isInteger(value)) {
+      el.value = previous ?? '';
+      showToast(i18n.t('settings.workers.notAWholeNumber'), 'error');
+      return;
+    }
+    try {
+      await this._saveNavigatorParams({ [key]: String(value) });
+    } catch (e) {
+      el.value = previous ?? '';
+      showToast(e.message, 'error');
+    }
+  }
+
+  async _saveNavigatorList(key, el) {
+    const previous = (this.data?.navigator?.[key.slice('navigator_'.length)] || []).join('\n');
+    const value = el.value;
+    const params = { [key]: value };
+    if (!value.trim()) params[`${key}_clear`] = '1';
+    try {
+      await this._saveNavigatorParams(params);
+      const normalized = this.data?.navigator?.[key.slice('navigator_'.length)];
+      if (Array.isArray(normalized)) el.value = normalized.join('\n');
+    } catch (e) {
+      el.value = previous;
+      showToast(e.message, 'error');
+    }
+  }
+
+  async _saveNavigatorParams(params) {
+    const payload = await api.updateNavigatorSettings(params);
+    if (payload?.navigator && this.data) {
+      this.data.navigator = payload.navigator;
+      this._repaintNavigatorDerived();
+    }
+    showToast(i18n.t('settings.saved'));
+    return payload;
+  }
+
+  _repaintNavigatorDerived() {
+    const nav = this.data?.navigator;
+    const scheduleEl = this.contentEl.querySelector('#navigator-schedule');
+    if (scheduleEl) {
+      scheduleEl.textContent = nav?.enabled && nav.schedule
+        ? i18n.t('settings.navigator.schedule', { schedule: nav.schedule }) : '';
+    }
+    const statusEl = this.contentEl.querySelector('#navigator-status');
+    if (statusEl) statusEl.innerHTML = this._renderNavigatorStatus(nav?.status);
+  }
+
+  async _loadNavigatorAccess() {
+    const gen = this._gen;
+    const block = this.contentEl.querySelector('#navigator-access');
+    if (!block) return;
+    let payload;
+    try {
+      payload = await api.getNavigatorAccess();
+    } catch {
+      if (this._stale(gen)) return;
+      const el = this.contentEl.querySelector('#navigator-access');
+      if (el) el.innerHTML = this._hint(i18n.t('settings.navigator.loadFailed'));
+      return;
+    }
+    if (this._stale(gen)) return;
+    const el = this.contentEl.querySelector('#navigator-access');
+    if (!el) return;
+    this._navigatorAccess = payload?.access ?? null;
+    el.innerHTML = this._renderNavigatorAccess(this._navigatorAccess);
+    this._wireNavigatorAccessButtons();
+  }
+
+  _wireNavigatorAccessButtons() {
+    for (const kind of ['notifications', 'usage']) {
+      const btn = this.contentEl.querySelector(`#navigator-open-${kind}`);
+      if (!btn) continue;
+      btn.addEventListener('click', () => this._openNavigatorAccess(kind));
+    }
+  }
+
+  async _openNavigatorAccess(kind) {
+    try {
+      const payload = await api.openNavigatorAccess(kind);
+      const el = this.contentEl.querySelector('#navigator-access');
+      if (el) {
+        this._navigatorAccess = payload?.access ?? null;
+        el.innerHTML = this._renderNavigatorAccess(this._navigatorAccess);
+        this._wireNavigatorAccessButtons();
+      }
+      if (payload?.opened) {
+        showToast(i18n.t(kind === 'notifications'
+          ? 'settings.navigator.notificationsOpened'
+          : 'settings.navigator.usageOpened'));
+      } else {
+        showToast(i18n.t('settings.navigator.openFailed'), 'error');
+      }
+    } catch (e) {
+      showToast(e.message, 'error');
     }
   }
 
@@ -2147,7 +2411,10 @@ export class SettingsController {
         const sec = h.closest('.settings-section');
         const collapsed = sec.classList.toggle('collapsed');
         if (collapsed) this._openSections.delete(sec.dataset.section);
-        else this._openSections.add(sec.dataset.section);
+        else {
+          this._openSections.add(sec.dataset.section);
+          if (sec.dataset.section === 'navigator') this._loadNavigatorAccess();
+        }
       });
     });
 
@@ -2159,6 +2426,10 @@ export class SettingsController {
     }
 
     this._wireWorkerSettings();
+    this._wireNavigatorSettings();
+    /* La lettura passa dal bridge nativo: si paga solo quando la sezione è
+       aperta, non a ogni apertura delle Impostazioni. */
+    if (this._openSections.has('navigator')) this._loadNavigatorAccess();
 
     // Telegram: widget condiviso con lo step di onboarding
     const tgContainer = this.contentEl.querySelector('#settings-telegram-widget');
@@ -2188,7 +2459,10 @@ export class SettingsController {
       document.removeEventListener('visibilitychange', this._onPowerVisible);
     }
     this._onPowerVisible = () => {
-      if (document.visibilityState === 'visible') this._loadPowerDiagnostics();
+      if (document.visibilityState === 'visible') {
+        this._loadPowerDiagnostics();
+        if (this._openSections.has('navigator')) this._loadNavigatorAccess();
+      }
     };
     document.addEventListener('visibilitychange', this._onPowerVisible);
     this._loadPowerDiagnostics();

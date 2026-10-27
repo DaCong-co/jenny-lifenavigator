@@ -386,6 +386,25 @@ drain 后即删除。监听服务默认**不采集**；第一个启用的 Naviga
 `/navigator notifications` / `/navigator usage` 会打开 Android 对应的系统授权页，
 方便授予通知使用权 / 使用情况访问；授权后下一个 cycle 自动生效。
 
+### 7.2 WebUI 设置面板
+
+“设置 → Life Navigator”是同一组配置的可视化入口，不用再手改 `config.json`：
+
+- 总开关、cycle 间隔、两次分析的最小间隔、每日上限、安静时段；
+  `enabled` / `interval_min` 保存后会立即重新 arm cron job，不需要重启。
+- 状态窗口、结果等待窗口、drift 天数、dismissal 冷却时间。
+- `watch_topics`、`sensitive_packages`、`blocked_packages` 用多行文本框编辑
+  （换行或逗号分隔；清空即清空列表）。
+- 感知开关：对话/对话文本、通知、App 使用、健康 inbox、粗位置、屏幕内容、系统状态，
+  以及“敏感应用脱敏”。
+- Android access 行显示通知使用权/使用情况访问的实时状态，按钮直接打开系统设置页；
+  从系统设置返回后会自动刷新。
+- 当前状态：最近一次 snapshot 的七个维度（change + 前三条事实）、待评估干预数、
+  最近分析/trigger、Navigator Self-Model。这里只读，不影响 Runtime。
+
+设置读取是 fail-soft 的：`navigator/` 暂时读不到时，面板显示不可用，但不会连带
+让整个设置页打不开。
+
 ---
 
 这两者职责不同：Navigator 是持续 Runtime（感知、触发、结构化判断、结果追踪），
@@ -444,9 +463,8 @@ python -m pytest -q
 ## 10. 本阶段明确未做
 
 1. Health Connect 采集器（睡眠 / 步数 / 心率 / 运动）；通知与 App 使用已接入，健康数据仍走 `navigator/inbox/`。
-2. WebUI 设置面板中的 Navigator 开关（当前用 `config.json` 或工作区文件编辑）。
-3. 自动修改核心规则（这是有意的：规则变更必须先与用户讨论并记录版本）。
-4. 真正的动作执行器（Phase 1 的权限层只允许“说”，`act` 永远需确认）。
-5. 探索能力的机会扫描（稳定期不推荐新方向；后续可作为独立低权重模块）。
-6. 把 Navigator hypotheses/self-model 注入主 Agent prompt（保持长期模型边界；
+2. 自动修改核心规则（这是有意的：规则变更必须先与用户讨论并记录版本）。
+3. 真正的动作执行器（Phase 1 的权限层只允许“说”，`act` 永远需确认）。
+4. 探索能力的机会扫描（稳定期不推荐新方向；后续可作为独立低权重模块）。
+5. 把 Navigator hypotheses/self-model 注入主 Agent prompt（保持长期模型边界；
    Life Model 仍是唯一注入主 prompt 的长期认知层）。

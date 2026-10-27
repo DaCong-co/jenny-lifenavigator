@@ -406,6 +406,28 @@ class ApiClient {
     return res.json();
   }
 
+  /* Il Life Navigator: manopole del runtime e interruttore del job orario. */
+  async updateNavigatorSettings(params) {
+    const res = await this._postWithQuery('/api/settings/navigator/update', params);
+    if (!res.ok) throw new Error(await this._errorText(res, 'Navigator settings update failed'));
+    return res.json();
+  }
+
+  /* Stato delle due autorizzazioni speciali Android (notifiche, uso app).
+     È una lettura separata dal payload impostazioni perché passa dal bridge
+     nativo e può impiegare qualche secondo. */
+  async getNavigatorAccess() {
+    const res = await this._fetch('/api/settings/navigator/access');
+    if (!res.ok) throw new Error(await this._errorText(res, 'Navigator access failed'));
+    return res.json();
+  }
+
+  async openNavigatorAccess(kind) {
+    const res = await this._postWithQuery('/api/settings/navigator/open-access', { kind });
+    if (!res.ok) throw new Error(await this._errorText(res, 'Navigator access failed'));
+    return res.json();
+  }
+
   /* Il testo di un rifiuto, col ripiego sullo status. Il corpo di un 400 del
      gateway è **testo semplice** (`http_utils.http_error`) e contiene il perché
      — «gardener_idle_min must be between 0–1440» — che buttato via lascerebbe

@@ -44,7 +44,11 @@ from jenny.webui.ssh_api import (
 from jenny.webui.worker_settings import (
     GARDENER_REARM_KEYS,
     MEMORY_REARM_KEYS,
+    NAVIGATOR_REARM_KEYS,
+    navigator_access_payload,
+    open_navigator_access,
     update_memory_settings,
+    update_navigator_settings,
     update_worker_settings,
 )
 
@@ -101,6 +105,14 @@ class WebUISettingsRouter:
             return await self._handle_settings_memory_update(request)
         if path == "/api/settings/workers/update":
             return await self._handle_settings_workers_update(request)
+        if path == "/api/settings/navigator/update":
+            return await self._handle_settings_navigator_update(request)
+        if path == "/api/settings/navigator/access":
+            return await self._handle_settings_navigator_access(request)
+        if path == "/api/settings/navigator/open-access":
+            return await self._handle_mutation(
+                request, open_navigator_access, "navigator access",
+            )
         if path == "/api/settings/web-search/update":
             return await self._handle_settings_web_search_update(request)
         if path == "/api/settings/location/update":
@@ -211,6 +223,29 @@ class WebUISettingsRouter:
         return await self._handle_mutation(
             request, update_worker_settings, "worker settings update", on_success=after,
         )
+
+    async def _handle_settings_navigator_update(self, request: WsRequest) -> Response:
+        """Le manopole del Life Navigator, incluso l'interruttore del job."""
+        def after(query: QueryParams, payload: dict[str, Any]) -> None:
+            if any(key in query for key in NAVIGATOR_REARM_KEYS):
+                self._fire_jobs_changed("navigator")
+
+        return await self._handle_mutation(
+            request,
+            update_navigator_settings,
+            "navigator settings update",
+            on_success=after,
+        )
+
+    async def _handle_settings_navigator_access(self, request: WsRequest) -> Response:
+        """Read-only Android access status; no settings file is touched."""
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            return self._json_response(await navigator_access_payload())
+        except Exception:
+            self.logger.exception("navigator access read failed")
+            return self._error_response(500, "navigator access read failed")
 
     async def _handle_settings_provider_update(self, request: WsRequest) -> Response:
         async def handler(query: QueryParams) -> dict[str, Any]:

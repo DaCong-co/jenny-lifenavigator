@@ -115,7 +115,7 @@ data model and privacy gates are in
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `agents.defaults.navigator.enabled` | bool | `true` | Registers the hourly Navigator job. This only runs the cheap local cycle; the trigger decides whether any LLM call happens, and most cycles do not. Disabling takes effect on the next tick; re-enabling after a start with it off needs a gateway restart, because there is no Settings control to re-arm the job. |
+| `agents.defaults.navigator.enabled` | bool | `true` | Registers the hourly Navigator job. This only runs the cheap local cycle; the trigger decides whether any LLM call happens, and most cycles do not. Disabling takes effect on the next tick; the Settings switch also re-arms (or disarms) the job immediately. |
 | `agents.defaults.navigator.intervalMin` | int ≥ 15 | `60` | Minutes between local cycles (the sampling rate of perception, not the LLM call rate). |
 | `agents.defaults.navigator.minMinutesBetweenAnalyses` | int ≥ 30 | `180` | Minimum gap between two Navigator analyses. |
 | `agents.defaults.navigator.maxAnalysesPerDay` | int ≥ 1 | `3` | Daily cap on analyses, except an `urgent` watched-topic event. |
@@ -127,7 +127,7 @@ data model and privacy gates are in
 | `agents.defaults.navigator.watchTopics` | string[] | `[]` | Topics you explicitly asked to be alerted about. A mention plus a high-value event becomes `urgent`. |
 | `agents.defaults.navigator.captureConversation` | bool | `true` | Observe user/assistant turns locally (metrics, short/ack flags, corrections). |
 | `agents.defaults.navigator.captureConversationText` | bool | `true` | Keep a bounded text excerpt in the observation. Set `false` to keep only metrics. |
-| `agents.defaults.navigator.captureNotifications` | bool | `true` | Accept notification observations from `navigator/inbox/`. |
+| `agents.defaults.navigator.captureNotifications` | bool | `true` | Collect notifications through the Android listener when access is granted (and still accept inbox observations). The stored observation keeps only package/app/category/ongoing, never title or body. |
 | `agents.defaults.navigator.captureAppUsage` | bool | `true` | Accept app-usage observations. |
 | `agents.defaults.navigator.captureHealth` | bool | `false` | Accept sleep/steps/heart-rate observations (whitelisted fields only). Off by default: minimal necessary collection. |
 | `agents.defaults.navigator.captureLocation` | bool | `true` | Accept coarse location (rounded to ~1 km). |
@@ -138,12 +138,11 @@ data model and privacy gates are in
 | `agents.defaults.navigator.blockedPackages` | string[] | `[]` | Package prefixes dropped entirely before storage, independent of the sensitive list (per-app switch). |
 | `agents.defaults.navigator.deliveryChannel` / `deliveryChatId` | string | `"websocket"` / `"default"` | Where the one proactive message is delivered. The deliverer mirrors to the paired Telegram chat too. |
 
-These are not yet in the Settings UI; edit `config.json` (or the workspace file
-editor). `enabled: false` stops the next tick immediately; turning it back on
-after a gateway started with it off needs a restart, because no settings handler
-re-arms this job yet. The other knobs are re-read on every cycle. `/navigator`
-in chat shows the current snapshot, pending interventions and the self-model
-without calling the model.
+These are also editable in **Settings → Life Navigator**: the enable switch and
+interval re-arm the cron job immediately, the other knobs are re-read on every
+cycle, and the panel shows Android access plus the latest snapshot. Editing
+`config.json` still works, but the Settings path avoids hand-editing the file.
+`/navigator` in chat shows the same state without calling the model.
 
 ### Behavior and identity
 
