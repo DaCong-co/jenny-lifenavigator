@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from jenny.navigator.expression import ExpressionLayer, MAX_MESSAGE_CHARS
+from jenny.navigator.expression import MAX_MESSAGE_CHARS, ExpressionLayer
 
 
 def test_sanitize_strips_fences_quotes_and_whitespace():

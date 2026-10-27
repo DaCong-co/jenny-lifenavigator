@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from jenny.navigator.models import (
-    DIMENSION_KEYS,
-    CHANGE_STABLE,
     CHANGE_CHANGED,
+    CHANGE_STABLE,
+    DIMENSION_KEYS,
     Dimension,
     NavigatorEvent,
     OutcomeRecord,

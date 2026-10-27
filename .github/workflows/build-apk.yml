@@ -27,7 +27,7 @@ jobs:
       # Chaquopy 构建需要一个与 `chaquopy.version = "3.11"` 匹配的
       # 构建主机 Python；ubuntu-latest 默认是 3.12，没有 python3.11。
       - name: Set up Python 3.11 (Chaquopy build Python)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -36,15 +36,48 @@ jobs:
           ln -sf "$(command -v python3)" /usr/local/bin/python3.11
           python3.11 --version
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 显式装 compileSdk 34 对应的 platform 并接受 license。build-tools
-      # 由 Gradle 在构建时按 AGP 8.7 的要求自动下载。
-      - name: Install Android SDK components
+      # ubuntu-latest ships the Android SDK, but the setup-android action is
+      # pinned to the deprecated Node 20 runtime and has been failing before
+      # Gradle even starts. Use the preinstalled SDK directly, and only
+      # download command-line tools if the image ever stops bundling them.
+      - name: Configure Android SDK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" > /dev/null 2>&1 || true
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "Android SDK not found at $SDK_ROOT" >&2
+            exit 1
+          fi
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found; installing Android command-line tools"
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -fsSL \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+              -o /tmp/android-cmdline-tools.zip
+            unzip -q /tmp/android-cmdline-tools.zip -d "$SDK_ROOT/cmdline-tools"
+            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --version
+
+      # Explicitly install the compileSdk 34 platform and its build-tools;
+      # Gradle otherwise resolves them lazily and a missing package fails
+      # halfway through the build.
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0"
 
       - name: Build debug APK
         working-directory: android

@@ -20,10 +20,10 @@ class FakeBridge:
         self.cleared = 0
         self.capture = None
 
-    def setNotificationCapture(self, enabled):
+    def setNotificationCapture(self, enabled):  # noqa: N802
         self.capture = bool(enabled)
 
-    def drainNotifications(self, since_ms, limit):
+    def drainNotifications(self, since_ms, limit):  # noqa: N802
         return json.dumps([{
             "ts": int((NOW - timedelta(minutes=5)).timestamp() * 1000),
             "package": "com.tencent.mm",
@@ -34,25 +34,25 @@ class FakeBridge:
             "ongoing": False,
         }])
 
-    def clearNotifications(self):
+    def clearNotifications(self):  # noqa: N802
         self.cleared += 1
 
-    def getUsageEvents(self, since_ms, until_ms):
+    def getUsageEvents(self, since_ms, until_ms):  # noqa: N802
         return json.dumps([
             {"package": "com.example.study", "app": "Study", "minutes": 42.5, "count": 3},
             {"package": "com.tencent.mm", "app": "WeChat", "minutes": 12.0, "count": 7},
         ])
 
-    def getSystemStatus(self):
+    def getSystemStatus(self):  # noqa: N802
         return json.dumps({
             "battery_percent": 63, "charging": False, "screen_on": True,
             "power_save": False, "network": "wifi", "uptime_s": 12345,
         })
 
-    def hasNotificationAccess(self):
+    def hasNotificationAccess(self):  # noqa: N802
         return True
 
-    def hasUsageAccess(self):
+    def hasUsageAccess(self):  # noqa: N802
         return False
 
 
