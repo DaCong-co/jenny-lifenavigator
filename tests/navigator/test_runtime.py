@@ -20,11 +20,23 @@ NOW = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
 
 
 class FakeSessions:
+    def __init__(self):
+        self._by_key = {}
+
     def get_or_create(self, key):
-        return SimpleNamespace(messages=[
-            {"role": "user", "content": "最近作业很多"},
-            {"role": "assistant", "content": "要不要先休息一下？"},
-        ])
+        if key not in self._by_key:
+            messages = (
+                [
+                    {"role": "user", "content": "最近作业很多"},
+                    {"role": "assistant", "content": "要不要先休息一下？"},
+                ]
+                if key == "unified:default" else []
+            )
+            self._by_key[key] = SimpleNamespace(messages=messages)
+        return self._by_key[key]
+
+    def save(self, session):
+        return None
 
 
 class FakeAgent:

@@ -156,8 +156,10 @@ class NavigatorCore:
 
     async def _run(self, agent: Any, prompt: str) -> str:
         from jenny.agent.tools.registry import ToolRegistry
+        from jenny.navigator.session_scope import reset_internal_session
         from jenny.session.turn_visibility import TurnVisibility
 
+        reset_internal_session(agent, CORE_SESSION_KEY)
         outcome = await agent.process_direct_outcome(
             prompt,
             session_key=CORE_SESSION_KEY,

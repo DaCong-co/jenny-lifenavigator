@@ -107,8 +107,10 @@ class ExpressionLayer:
 
     async def _run(self, agent: Any, prompt: str) -> str:
         from jenny.agent.tools.registry import ToolRegistry
+        from jenny.navigator.session_scope import reset_internal_session
         from jenny.session.turn_visibility import TurnVisibility
 
+        reset_internal_session(agent, EXPRESSION_SESSION_KEY)
         outcome = await agent.process_direct_outcome(
             prompt,
             session_key=EXPRESSION_SESSION_KEY,

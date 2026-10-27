@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 from jenny.agent.turn_types import TurnOutcome
 from jenny.config.schema import NavigatorConfig
@@ -16,9 +15,29 @@ from jenny.navigator.store import NavigatorStore
 NOW = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
 
 
+class FakeSession:
+    def __init__(self, messages=None):
+        self.messages = list(messages or [])
+
+    def clear(self):
+        self.messages.clear()
+
+
 class FakeSessions:
+    def __init__(self):
+        self._by_key = {}
+
     def get_or_create(self, key):
-        return SimpleNamespace(messages=[{"role": "user", "content": "最近作业很多"}])
+        if key not in self._by_key:
+            messages = (
+                [{"role": "user", "content": "最近作业很多"}]
+                if key == "unified:default" else []
+            )
+            self._by_key[key] = FakeSession(messages)
+        return self._by_key[key]
+
+    def save(self, session):
+        return None
 
 
 class FakeAgent:
@@ -71,6 +90,12 @@ def test_real_core_and_expression_produce_and_deliver_one_message(tmp_path):
 
         agent = FakeAgent()
         agent.workspace = tmp_path
+        agent.sessions.get_or_create("internal:navigator_core").messages.append(
+            {"role": "assistant", "content": "OLD CORE JSON"},
+        )
+        agent.sessions.get_or_create("internal:navigator_expression").messages.append(
+            {"role": "assistant", "content": "OLD EXPRESSION"},
+        )
         runtime = NavigatorRuntime(
             agent,
             NavigatorConfig(
@@ -99,3 +124,5 @@ def test_real_core_and_expression_produce_and_deliver_one_message(tmp_path):
     assert "Structured decision" in agent.prompts[1]
     assert "Output contract" in agent.prompts[0]
     assert "Return ONLY the message" in agent.prompts[1]
+    assert agent.sessions.get_or_create("internal:navigator_core").messages == []
+    assert agent.sessions.get_or_create("internal:navigator_expression").messages == []
