@@ -1,7 +1,7 @@
 name: Build APK
 
 # 手动触发（Actions 页面点 "Run workflow"），或 push 到 main 自动触发。
-# 产物是 debug APK（未签名，可直接拖进 MuMu 模拟器安装）。
+# 产物是 release APK，用仓库 Secrets 里的固定 keystore 签名，可覆盖安装。
 on:
   workflow_dispatch:
   push:
@@ -69,6 +69,32 @@ jobs:
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           "$SDKMANAGER" --version
 
+      # Fixed release key, restored from repository secrets. Without this the
+      # APK would be debug-signed with a fresh key on every runner, so no build
+      # could ever update the previous one in place.
+      - name: Restore release keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.JENNY_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.JENNY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JENNY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.JENNY_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "JENNY_KEYSTORE_BASE64 secret is missing" >&2
+            exit 1
+          fi
+          KEYSTORE="$RUNNER_TEMP/jenny-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          {
+            echo "JENNY_KEYSTORE_PATH=$KEYSTORE"
+            echo "JENNY_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "JENNY_KEY_ALIAS=$KEY_ALIAS"
+            echo "JENNY_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       # Explicitly install the compileSdk 34 platform and its build-tools;
       # Gradle otherwise resolves them lazily and a missing package fails
       # halfway through the build.
@@ -79,15 +105,15 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: jenny-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: jenny-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
