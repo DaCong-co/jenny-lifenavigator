@@ -105,6 +105,8 @@ async def cmd_navigator(ctx: CommandContext) -> OutboundMessage:
             lines.append(f"Last analysis: {state['last_llm_at']}")
         else:
             lines.append("Last analysis: none yet")
+        if state.get("last_priority"):
+            lines.append(f"Last trigger priority: {state['last_priority']}")
         if snapshot is None:
             lines.append("")
             lines.append(
