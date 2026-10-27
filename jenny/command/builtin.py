@@ -97,6 +97,10 @@ async def cmd_navigator(ctx: CommandContext) -> OutboundMessage:
         snapshot = store.latest_snapshot()
         state = store.read_trigger_state()
         lines = ["🧭 Life Navigator"]
+        with suppress(Exception):
+            from jenny.config.loader import load_config
+            enabled = load_config().agents.defaults.navigator.enabled
+            lines.append(f"Runtime: {'enabled' if enabled else 'disabled'}")
         if state.get("last_llm_at"):
             lines.append(f"Last analysis: {state['last_llm_at']}")
         else:
