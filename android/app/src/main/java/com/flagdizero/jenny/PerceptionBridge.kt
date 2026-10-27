@@ -193,7 +193,7 @@ class PerceptionBridge(context: Context) {
             BatteryManager.BATTERY_PROPERTY_CAPACITY,
         )
         val charging = try {
-            batteryManager.isCharging
+            batteryManager.isCharging()
         } catch (_: Exception) {
             false
         }
@@ -213,8 +213,8 @@ class PerceptionBridge(context: Context) {
         JSONObject()
             .put("battery_percent", if (capacity in 0..100) capacity else -1)
             .put("charging", charging)
-            .put("screen_on", power.isInteractive)
-            .put("power_save", power.isPowerSaveMode)
+            .put("screen_on", power.isInteractive())
+            .put("power_save", power.isPowerSaveMode())
             .put("network", network)
             .put("uptime_s", SystemClock.elapsedRealtime() / 1000L)
             .toString()
