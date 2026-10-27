@@ -56,7 +56,7 @@ def test_the_settings_screen_wires_the_navigator_section() -> None:
 
 
 def test_both_locales_have_the_navigator_block() -> None:
-    for locale in ("en", "it"):
+    for locale in ("en", "it", "zh"):
         data = json.loads(
             (_ASSETS / "i18n" / f"{locale}.json").read_text(encoding="utf-8")
         )

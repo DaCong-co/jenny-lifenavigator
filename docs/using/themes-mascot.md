@@ -60,7 +60,7 @@ If your phone has "reduce motion" turned on at the OS level, Jenny respects it: 
 
 ## UI language
 
-The interface exists in two languages: Italian and English. On first launch, before you've made any choice, Jenny reads the phone's system language and picks Italian or English if either matches (checking an exact match first, then just the language prefix); if neither matches, it falls back to English.
+The interface exists in three languages: Italian, English and Simplified Chinese. On first launch, before you've made any choice, Jenny reads the phone's system language and picks one if it matches (checking an exact match first, then just the language prefix); if none matches, it falls back to English.
 
 You can change it anytime from **Settings → Personalization → Language**, with a two-button segmented control (Italiano / English). Switching is instant — the whole interface re-renders in the new language with no reload and no restart.
 

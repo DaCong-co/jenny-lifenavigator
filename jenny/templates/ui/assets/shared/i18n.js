@@ -7,7 +7,7 @@ export class I18n {
 
   detectLocale() {
     const nav = navigator.language;
-    const supported = ['it', 'en'];
+    const supported = ['it', 'en', 'zh'];
     return supported.find(s => s === nav) || supported.find(s => nav.startsWith(s)) || 'en';
   }
 
@@ -64,12 +64,12 @@ export class I18n {
   }
 
   get availableLocales() {
-    return ['it', 'en'];
+    return ['it', 'en', 'zh'];
   }
 
   getLocaleName(locale) {
     const names = {
-      'it': 'Italiano', 'en': 'English'
+      'it': 'Italiano', 'en': 'English', 'zh': '简体中文'
     };
     return names[locale] || locale;
   }

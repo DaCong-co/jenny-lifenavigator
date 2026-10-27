@@ -123,6 +123,17 @@ _BOT_STRINGS: dict[str, dict[str, str]] = {
         ),
         "media_soon": "📎 Photos, voice notes and documents are coming soon: text only for now.",
     },
+    "zh": {
+        "paired": "✅ 已连接！现在可以在这个聊天里和 Jenny 对话。",
+        "welcome": (
+            "像平常聊天一样给我发消息，Jenny 会回复你。\n\n"
+            "• /new — 开始新对话\n"
+            "• 📎 图片、语音和文件即将支持"
+        ),
+        "start_prompt": "要配对，请把 Jenny WebUI 里显示的 6 位验证码发给我。",
+        "wrong_code": "验证码不正确。请检查 Jenny WebUI 里的 6 位验证码后重试。",
+        "media_soon": "📎 图片、语音和文件即将支持：目前只支持文字。",
+    },
 }
 
 

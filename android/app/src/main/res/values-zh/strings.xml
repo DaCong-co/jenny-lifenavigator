@@ -1,0 +1,15 @@
+<resources>
+    <!-- 中文系统通知：Android 会根据手机语言选择 values-zh。 -->
+    <string name="gateway_notification_title">Jenny 正在运行</string>
+    <string name="gateway_notification_text">随时回复，并执行定时任务</string>
+    <string name="gateway_channel_name">后台服务</string>
+    <string name="gateway_channel_description">Jenny 在后台运行时显示。Android 要求保留此通知，直到 Jenny 停止。点击可打开 Jenny。</string>
+
+    <string name="alerts_channel_name">提醒</string>
+    <string name="alerts_channel_description">Jenny 主动发送的提醒和消息</string>
+
+    <string name="update_channel_name">应用更新</string>
+    <string name="update_channel_description">已下载的更新需要你确认安装时显示</string>
+    <string name="update_notification_title">更新已准备好安装</string>
+    <string name="update_notification_text">点击确认——安装完成后 Jenny 会自动重启</string>
+</resources>

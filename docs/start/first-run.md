@@ -78,7 +78,7 @@ Pressing **Launch** does the following, in order:
 
 1. **Validates the provider before saving anything.** The backend tries to actually construct a provider from what you entered. If that fails (bad format, missing key, provider rejects the request), you get an error toast on the spot — e.g. `Provider configuration is invalid: ...` — and **nothing is written to config.json**. You stay on the same step and can fix the fields and try again.
 2. Only if validation succeeds: writes `providers.providers` (replacing whatever provider list previously existed — see the gotcha below), `providers.default`, `agents.defaults.model`, `agents.defaults.bot_name`, and the current UI language to `agents.defaults.language`.
-3. Adds a localized welcome message to the chat — in English: *"Hi, I'm {assistant name} and from today I live on your smartphone. Nice to meet you!"*
+3. Adds a localized welcome message to the chat — in English: *"Hi, I'm {assistant name} and from today I live on your smartphone. Nice to meet you!"*; Italian and Simplified Chinese use their own templates.
 4. Signals the gateway to create and start the agent **immediately, with no app restart**. The gateway was already running (just without an agent); it picks up the new configuration and becomes usable right away.
 
 ## Interrupting the wizard

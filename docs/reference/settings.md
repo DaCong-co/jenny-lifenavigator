@@ -2,7 +2,7 @@
 
 Every control in the Settings screen, what it does, and its default value.
 
-Settings is a single accordion of 10 sections — Personalization, Model, Tools, **Memory**, **Wiki and projects**, Background activity, SSH, Telegram, Backup & restore, System — all collapsed the first time you open the screen (Background activity opens itself when the battery-optimization exemption is missing). There is no global Save button: almost every field saves itself, with a "Saved!" toast confirming the write. A few controls (theme, mascot, Home button, language, Developer mode) live entirely on the device and never touch `config.json` at all — those are called out explicitly below.
+Settings is a single accordion of 11 sections — Personalization, Model, Tools, **Memory**, **Wiki and projects**, **Life Navigator**, Background activity, SSH, Telegram, Backup & restore, System — all collapsed the first time you open the screen (Background activity opens itself when the battery-optimization exemption is missing). There is no global Save button: almost every field saves itself, with a "Saved!" toast confirming the write. A few controls (theme, mascot, Home button, language, Developer mode) live entirely on the device and never touch `config.json` at all — those are called out explicitly below.
 
 ## How saving works
 
@@ -32,7 +32,7 @@ Everything not on that list saves on touch.
 | **Mascot** — Color mascot | Off switches the mascot to black-and-white artwork. | On |
 | **Home button** | Which view Android's Home button lands on when Jenny is your launcher: Chat, Apps, Workspace, or "Wherever I was". See [Launcher setup](../start/launcher-setup.md). | Chat |
 | **Bot Name** | Free-text field for the assistant's name used in chat and the welcome message. Saves with the 600 ms debounce. Changing it flips `requires_restart` server-side, but the UI never tells you — see above. | "Jenny" |
-| **Language** | Segmented Italian/English switch. Changes the UI's own strings instantly; does **not** change `agents.defaults.language` in `config.json` (that field is only ever written once, during onboarding, and drives backend-generated text like the welcome message). | Detected from the browser/WebView locale at first launch |
+| **Language** | Segmented Italian/English/Simplified Chinese switch. Changes the UI's own strings instantly; does **not** change `agents.defaults.language` in `config.json` (that field is only ever written once, during onboarding, and drives backend-generated text like the welcome message). | Detected from the browser/WebView locale at first launch |
 
 The three mascot options below the toggle stay on screen when she's switched off — greyed out and inert, not removed. That's deliberate: hiding them meant that turning her off, which is exactly what someone does right before going looking for a way to tame her, deleted the answer to the question from the page.
 
@@ -122,6 +122,19 @@ The other periodic worker, plus one project-side switch.
 
 - **The gardener** — `enabled`, `intervalMin`, `idleMin`, `minHoursBetweenPasses`. The section carries a hint spelling out that turning it off is not uninstalling it: the wikis stay, nothing prunes them.
 - **`compactProjectsWhenIdle`** — whether idle project chats get compacted. It takes effect from the next start, which the field says on the spot rather than leaving you to wonder why nothing changed.
+
+## Life Navigator
+
+The cognitive runtime's controls and a read-only view of what it currently holds.
+
+- **Run / cadence** — the enable switch, cycle interval, minimum gap between analyses and daily cap. Changing `enabled` or `intervalMin` re-arms (or disarms) the cron job immediately; the other numbers are re-read on the next cycle.
+- **Quiet hours and state windows** — quiet start/end, aggregated-state window, outcome window, drift days and dismissal cooldown.
+- **Topics and packages** — `watchTopics`, `sensitivePackages` and `blockedPackages` are multi-line lists, split on newlines or commas. Clearing a box clears the list; an empty list cannot travel as a normal query value.
+- **Perception switches** — conversation, conversation text excerpt, notifications, app usage, health inbox, coarse location, screen content and device status, plus sensitive-app redaction. These are local gates; Android's own permissions still apply.
+- **Android access** — live notification-access and usage-access state, with buttons that open the corresponding system settings screen. It refreshes when you come back to the app.
+- **Current state** — latest snapshot time, seven dimensions with change and a few facts, pending interventions, last analysis/trigger, and the Navigator self-model. Nothing here calls the model.
+
+The same values live in `agents.defaults.navigator`; see [Configuration reference](configuration.md) and [Life Navigator Runtime](../internals/lifenavigator-runtime.md).
 
 ## Background activity
 

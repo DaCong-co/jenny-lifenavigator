@@ -1,6 +1,6 @@
-"""Parità delle chiavi fra i due file i18n della WebUI.
+"""Parità delle chiavi fra i file i18n della WebUI (it/en/zh).
 
-Una chiave presente solo in ``it.json`` (o solo in ``en.json``) non fallisce da
+Una chiave presente solo in un file (o solo in un altro) non fallisce da
 nessuna parte: ``i18n.t()`` ritorna la chiave grezza, e l'utente dell'altra
 lingua si ritrova ``subagents.relaunch`` stampato nell'interfaccia. Questo test
 è il posto dove quella divergenza si nota.
@@ -29,11 +29,12 @@ def _load(locale: str) -> dict:
     return json.loads((_I18N_DIR / f"{locale}.json").read_text(encoding="utf-8"))
 
 
-def test_it_and_en_have_the_same_keys() -> None:
-    it_keys = _flatten(_load("it"))
-    en_keys = _flatten(_load("en"))
-    assert it_keys - en_keys == set(), "chiavi presenti solo in it.json"
-    assert en_keys - it_keys == set(), "chiavi presenti solo in en.json"
+def test_all_locales_have_the_same_keys() -> None:
+    base = _flatten(_load("it"))
+    for locale in ("en", "zh"):
+        keys = _flatten(_load(locale))
+        assert base - keys == set(), f"chiavi presenti solo in it.json rispetto a {locale}.json"
+        assert keys - base == set(), f"chiavi presenti solo in {locale}.json"
 
 
 def test_subagent_panel_strings_exist_in_both_locales() -> None:
@@ -87,7 +88,7 @@ def test_subagent_panel_strings_exist_in_both_locales() -> None:
             "error",
         )
     }
-    for locale in ("it", "en"):
+    for locale in ("it", "en", "zh"):
         keys = _flatten(_load(locale))
         assert expected <= keys, f"chiavi mancanti in {locale}.json: {sorted(expected - keys)}"
 
@@ -112,7 +113,7 @@ def test_workspace_file_help_strings_exist_in_both_locales() -> None:
         "workspace.fileHelp.memory",
         "workspace.fileHelp.heartbeat",
     }
-    for locale in ("it", "en"):
+    for locale in ("it", "en", "zh"):
         keys = _flatten(_load(locale))
         assert expected <= keys, f"chiavi mancanti in {locale}.json: {sorted(expected - keys)}"
 
@@ -132,7 +133,7 @@ def test_workspace_file_help_map_points_at_existing_keys() -> None:
     mapping = dict(re.findall(r"'([^']+)':\s*'([^']+)'", block.group(1)))
 
     assert set(mapping) == {"AGENTS.md", "USER.md", "SOUL.md", "HEARTBEAT.md", "memory/MEMORY.md"}
-    for locale in ("it", "en"):
+    for locale in ("it", "en", "zh"):
         keys = _flatten(_load(locale))
         missing = set(mapping.values()) - keys
         assert missing == set(), f"chiavi referenziate dal JS ma assenti in {locale}.json: {sorted(missing)}"
@@ -152,7 +153,7 @@ def test_dead_subagent_keys_are_gone_from_both_locales() -> None:
     for dead in ("subagents.empty", "subagents.detail.state", "subagents.detail.elapsed",
                  "subagents.detail.idle", "subagents.detail.toolEvents"):
         assert dead not in chat_js
-        for locale in ("it", "en"):
+        for locale in ("it", "en", "zh"):
             assert dead not in _flatten(_load(locale)), f"{dead} è ancora in {locale}.json"
 
 
@@ -173,11 +174,20 @@ def test_placeholders_match_between_locales() -> None:
                 out[full] = child
         return out
 
-    it_strings = flat_strings(_load("it"))
     en_strings = flat_strings(_load("en"))
-    mismatched = [
-        key
-        for key, text in it_strings.items()
-        if key in en_strings and placeholders(text) != placeholders(en_strings[key])
-    ]
-    assert mismatched == []
+    for locale in ("it", "zh"):
+        strings = flat_strings(_load(locale))
+        mismatched = [
+            key
+            for key, text in strings.items()
+            if key in en_strings and placeholders(text) != placeholders(en_strings[key])
+        ]
+        assert mismatched == [], f"{locale}.json: {mismatched}"
+
+
+def test_simplified_chinese_is_a_registered_locale() -> None:
+    js = (_I18N_DIR.parent / "shared" / "i18n.js").read_text(encoding="utf-8")
+
+    assert "'zh'" in js
+    assert "简体中文" in js
+    assert (_I18N_DIR / "zh.json").is_file()

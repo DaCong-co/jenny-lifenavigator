@@ -24,7 +24,7 @@ Two consequences worth naming. Working on a project is always done **from inside
 
 Two commands — `/stop` and `/status` — are handled on a "priority" fast path that runs even while a turn is actively streaming or a tool is executing. The rest wait for the current dispatch to be free, which in practice is rarely noticeable.
 
-All server-side command responses below are **hardcoded in English**, regardless of whether the WebUI is set to Italian or English. This is true for the confirmation text, the usage/error messages, and the `/status`/`/model` output.
+All server-side command responses below are **hardcoded in English**, regardless of the WebUI language. This is true for the confirmation text, the usage/error messages, and the `/status`/`/model` output.
 
 ## The server commands
 

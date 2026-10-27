@@ -85,7 +85,7 @@ import { i18n } from './i18n.js';
 button.textContent = i18n.t('dialog.confirm');
 ```
 
-Adding a string means adding the key to **both** JSON files. A literal in JS or HTML is a bug even when the app happens to be running in that language.
+Adding a string means adding the key to **every** JSON file under `jenny/templates/ui/assets/i18n/`. A literal in JS or HTML is a bug even when the app happens to be running in that language.
 
 ### New WebUI files must be declared
 
