@@ -15,8 +15,12 @@ NOW = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
 
 
 class ConfigProvider:
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+
     def __call__(self):
         return SimpleNamespace(
+            enabled=self.enabled,
             capture_conversation=True, capture_conversation_text=True,
             capture_notifications=True, capture_app_usage=True,
             capture_health=False, capture_location=True, capture_screen=False,
@@ -29,6 +33,18 @@ def _observer(tmp_path):
         tmp_path, timezone_name="Asia/Shanghai", config_provider=ConfigProvider(),
         now_fn=lambda: NOW,
     )
+
+
+def test_disabled_runtime_does_not_observe(tmp_path):
+    observer = NavigatorTurnObserver(
+        tmp_path, timezone_name="Asia/Shanghai",
+        config_provider=ConfigProvider(enabled=False), now_fn=lambda: NOW,
+    )
+    turn = observer.observe_turn(
+        session_key="unified:default", user_text="今天有点累", now=NOW,
+    )
+    assert turn.user_observation_id == ""
+    assert NavigatorStore(tmp_path).list_observations() == []
 
 
 def test_hook_records_one_user_turn(tmp_path):

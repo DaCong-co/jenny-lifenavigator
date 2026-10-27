@@ -125,8 +125,10 @@ class NavigatorTurnObserver:
         channel: str = "",
         now: datetime | None = None,
     ) -> TurnObservation:
-        store = NavigatorStore(self.workspace)
         config = self._config()
+        if not bool(getattr(config, "enabled", True)):
+            return TurnObservation(user_observation_id="")
+        store = NavigatorStore(self.workspace)
         perception = PerceptionManager(
             store,
             timezone_name=self.timezone_name,
