@@ -19,7 +19,7 @@ thinking, which keeps "continuous perception, not continuous thought" true.
 
 from __future__ import annotations
 
-import asyncio
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -58,8 +58,11 @@ Deliver = Callable[[Any], Awaitable[None]]
 
 # One cycle at a time per process. A cycle can contain two LLM turns; if the
 # cron tick fires again before it finishes, a second cycle would duplicate the
-# snapshot, the outcome and possibly the message.
-_CYCLE_LOCK = asyncio.Lock()
+# snapshot, the outcome and possibly the message. ``acquire(blocking=False)`` is
+# the point: a contender must be told "busy" now, not queued to run the same
+# analysis a moment later. The lock is never contended by another thread, so
+# holding it across awaits does not block the event loop.
+_CYCLE_MUTEX = threading.Lock()
 
 
 def _config_value(config: Any, name: str, default: Any) -> Any:
@@ -236,16 +239,17 @@ class NavigatorRuntime:
     async def run_cycle(self, *, now: datetime | None = None) -> NavigatorCycleResult:
         if not _config_bool(self.config, "enabled", True):
             return NavigatorCycleResult(status="disabled")
-        if _CYCLE_LOCK.locked():
+        if not _CYCLE_MUTEX.acquire(blocking=False):
             return NavigatorCycleResult(status="busy")
-        async with _CYCLE_LOCK:
-            try:
-                return await self._run_cycle(now=now)
-            except Exception as exc:  # noqa: BLE001 - a cycle must never crash cron
-                logger.opt(exception=True).error("Navigator: cycle failed")
-                return NavigatorCycleResult(
-                    status="error", error=f"{type(exc).__name__}: {exc}",
-                )
+        try:
+            return await self._run_cycle(now=now)
+        except Exception as exc:  # noqa: BLE001 - a cycle must never crash cron
+            logger.opt(exception=True).error("Navigator: cycle failed")
+            return NavigatorCycleResult(
+                status="error", error=f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            _CYCLE_MUTEX.release()
 
     async def _run_cycle(self, *, now: datetime | None) -> NavigatorCycleResult:
         moment = now or self._now_fn()

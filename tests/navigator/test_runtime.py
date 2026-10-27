@@ -107,6 +107,22 @@ def _important(**kwargs):
     )
 
 
+async def test_a_second_cycle_is_busy_while_one_is_running(tmp_path):
+    from jenny.navigator import runtime as runtime_module
+
+    runtime, store, core, trigger, expr = _runtime(
+        tmp_path, trigger_decision=_important(),
+    )
+    runtime_module._CYCLE_MUTEX.acquire()
+    try:
+        result = await runtime.run_cycle(now=NOW)
+    finally:
+        runtime_module._CYCLE_MUTEX.release()
+
+    assert result.status == "busy"
+    assert core.calls == 0
+
+
 async def test_no_trigger_costs_no_llm_call(tmp_path):
     runtime, store, core, trigger, expr = _runtime(
         tmp_path, trigger_decision=TriggerDecision(priority=TriggerPriority.NO_TRIGGER),
