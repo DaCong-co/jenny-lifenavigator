@@ -1,11 +1,9 @@
 name: Build APK
 
-# 手动触发（Actions 页面点 "Run workflow"），或 push 到 main 自动触发。
-# 产物是 release APK，用仓库 Secrets 里的固定 keystore 签名，可覆盖安装。
+# 现在 APK 在本地构建并签名；此工作流保留为手动备份入口，
+# 不再随 push 自动触发（签名 Secrets 已从仓库删除）。
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   build-apk:
