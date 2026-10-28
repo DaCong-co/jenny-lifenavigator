@@ -20,5 +20,5 @@ from __future__ import annotations
 # quindi il client non deve conoscere il numero di versione per trovarla.
 # ``scripts/release.py`` pubblica l'asset con questo nome esatto.
 DEFAULT_MANIFEST_URL = (
-    "https://github.com/flagdizero/jenny-android-ai-agent/releases/latest/download/latest.json"
+    "https://github.com/DaCong-co/jenny-lifenavigator/releases/latest/download/latest.json"
 )
